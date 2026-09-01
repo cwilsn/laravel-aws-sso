@@ -79,12 +79,18 @@ final readonly class ProcessAwsCli implements AwsCli
                 $tty ? null : $onOutput,
             );
 
-        if (! $result->successful()) {
-            throw AwsAuthenticationFailed::loginFailed(
-                $profile,
-                $result->errorOutput() ?: $result->output(),
-            );
+        if ($result->successful()) {
+            return;
         }
+
+        // Both streams are empty whenever the CLI ran on a TTY, so the failure
+        // has to be described from the exit code alone.
+        throw AwsAuthenticationFailed::loginFailed(
+            $profile,
+            $result->errorOutput() ?: $result->output(),
+            $result->exitCode(),
+            attachedToTty: $tty,
+        );
     }
 
     private function pending(): PendingProcess

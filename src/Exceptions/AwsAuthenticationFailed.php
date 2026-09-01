@@ -36,15 +36,30 @@ final class AwsAuthenticationFailed extends RuntimeException implements LaravelA
 
     /**
      * `aws sso login` itself failed, most often a missing or misconfigured profile.
+     *
+     * On a TTY the AWS CLI is handed `/dev/tty` directly, so neither stream is
+     * captured and `$output` arrives empty. The exit code is then the only
+     * detail left to report, and the message says where the real output went
+     * rather than presenting the blank excerpt as if the CLI had said nothing.
      */
-    public static function loginFailed(string $profile, string $output): self
-    {
-        return self::withOutput(implode(PHP_EOL, [
-            'AWS profile ['.$profile.'] could not be authenticated.',
-            '',
-            'Confirm it exists and is configured for IAM Identity Center:',
-            '  aws configure sso --profile '.$profile,
-        ]), $output);
+    public static function loginFailed(
+        string $profile,
+        string $output,
+        ?int $exitCode = null,
+        bool $attachedToTty = false,
+    ): self {
+        $lines = ['AWS profile ['.$profile.'] could not be authenticated'.self::exitedWith($exitCode).'.'];
+
+        if ($attachedToTty && trim($output) === '') {
+            $lines[] = '';
+            $lines[] = 'The AWS CLI wrote its output straight to this terminal, so the cause is in the messages above.';
+        }
+
+        $lines[] = '';
+        $lines[] = 'Confirm the profile exists and is configured for IAM Identity Center:';
+        $lines[] = '  aws configure sso --profile '.$profile;
+
+        return self::withOutput(implode(PHP_EOL, $lines), $output);
     }
 
     /**
@@ -80,6 +95,11 @@ final class AwsAuthenticationFailed extends RuntimeException implements LaravelA
             'Unable to read the identity returned by `aws sts get-caller-identity`. '
             .'Confirm the AWS CLI is v2 and returns JSON.'
         );
+    }
+
+    private static function exitedWith(?int $exitCode): string
+    {
+        return $exitCode === null ? '' : ' (exit code '.$exitCode.')';
     }
 
     private static function withOutput(string $message, string $output, ?Throwable $previous = null): self
