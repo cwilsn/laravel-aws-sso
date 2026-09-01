@@ -1,405 +1,157 @@
 # Laravel AWS SSO
 
-**Seamless AWS IAM Identity Center authentication for local Laravel development.**
+**AWS IAM Identity Center authentication for local Laravel development.**
 
-> **Alpha.** This is `v0.1.0-alpha.1`. It is being used and tested in anger, but the API may change before 1.0 and the configuration keys are not yet frozen. Feedback and bug reports are welcome.
+Laravel AWS SSO checks that your configured AWS profile can authenticate before `php artisan dev` starts. If the profile needs a fresh Identity Center session, it runs `aws sso login` and opens the browser. While Laravel is running, a companion process continues checking the session and lets you sign in again without restarting the rest of your development processes.
 
-Stop storing long-lived AWS access keys in your Laravel `.env`. Laravel AWS SSO ensures your IAM Identity Center session is valid when `php artisan dev` starts, keeps checking it while your development processes run, and only asks you to sign in when necessary.
-
-```bash
-# First run of the day
-$ php artisan dev
-AWS SSO session for [my-dev-profile] has expired. Signing in...
-Attempting to automatically open the SSO authorization page in your default browser...
-Successfully logged into Start URL: https://example.awsapps.com/start
-AWS authenticated with [my-dev-profile]: arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_LaravelDeveloper_0a1b/you
-
-# Every run after that
-$ php artisan dev
-# Laravel's dev UI starts immediately. An aws-sso process quietly keeps watch.
-
-# If the session expires later
-AWS SSO session [my-dev-profile] is no longer usable.
-Select the aws-sso tab and press r to sign in.
-
-# When you return, select that tab and press r
-AWS SSO session for [my-dev-profile] has expired. Signing in...
-# The browser login opens without restarting php artisan dev.
-```
-
----
-
-## Contents
-
-- [Why this package exists](#why-this-package-exists)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [How it works](#how-it-works)
-- [Configuration](#configuration)
-- [Identity guardrails](#identity-guardrails)
-  - [Guardrails and static credentials](#guardrails-and-static-credentials)
-- [Commands](#commands)
-- [What this package never does](#what-this-package-never-does)
-- [Troubleshooting](#troubleshooting)
-- [Testing, changelog, contributing, security](#testing)
-
----
-
-## Why this package exists
-
-Long-lived IAM user access keys in a local `.env` are a persistent liability:
-
-- They leak into shell history, backups, support bundles, screenshots, and accidental commits.
-- They stay valid for months or years unless somebody manually rotates them.
-- They are routinely granted far broader permissions than the app actually needs.
-- Revoking one means finding every developer who has a copy.
-
-AWS IAM Identity Center replaces them with a browser sign-in that issues **short-lived role credentials**. The AWS CLI and the AWS SDK for PHP both understand Identity Center profiles natively — the only friction left is remembering to run `aws sso login` before you start work. This package removes that last step.
-
-### ⚠️ This package does not make your AWS permissions safe
-
-> **If you authenticate an `AdministratorAccess` profile, your local application effectively has administrator access for the entire session.** A stray `Storage::delete()`, a bad migration against the wrong account, or a compromised dependency inherits everything that permission set can do.
->
-> Create a dedicated, least-privileged permission set for local application use and point `AWS_PROFILE` at that.
-
-A sensible split looks like this:
-
-```text
-Your Identity Center user
-  |
-  +-- AdministratorAccess     permission set   (human admin work, console only)
-  |
-  +-- LaravelDeveloper        permission set   (what the local app runs as)
-```
-
-`LaravelDeveloper` should grant only what the application actually touches — the development S3 bucket, the development SQS queues, the SES sandbox, and nothing else. Use [`expected_role`](#identity-guardrails) to make it a hard error if the wrong permission set is ever active.
-
----
+> Use a dedicated, least-privileged permission set for local development. Your application receives every permission granted to the selected profile.
 
 ## Requirements
 
-| | |
+| Dependency | Version |
 |---|---|
 | PHP | `^8.3` |
-| Laravel | `^13.18` (the release that added priority-based vendor registration to `php artisan dev`) |
-| AWS CLI | v2, with IAM Identity Center support |
+| Laravel | `^13.18` |
+| AWS CLI | v2 with IAM Identity Center support |
 
-This package does **not** require `aws/aws-sdk-php`. It talks to the AWS CLI only; your application keeps whatever AWS SDK dependencies it already has.
-
----
+The package does not require `aws/aws-sdk-php`. Your application can continue using its existing AWS SDK dependencies.
 
 ## Installation
 
-### Step 1 — Configure an IAM Identity Center profile
-
-This assumes your organization has IAM Identity Center enabled and you have been assigned a permission set. On your machine:
+### 1. Configure an Identity Center profile
 
 ```bash
 aws configure sso --profile my-dev-profile
-```
-
-Follow the prompts, choosing the **least-privileged** permission set for local development. See the [AWS CLI Identity Center guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) for the full walkthrough, and [`aws configure sso-session`](https://docs.aws.amazon.com/cli/latest/userguide/sso-configure-profile-token.html) if you want one session shared across profiles.
-
-Confirm it works before installing anything:
-
-```bash
 aws sts get-caller-identity --profile my-dev-profile
 ```
 
-### Step 2 — Install the package
+Choose the least-privileged permission set your local application needs. See the [AWS CLI IAM Identity Center guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html) for profile setup details.
+
+### 2. Install the package
 
 ```bash
-composer require cwilsn/laravel-aws-sso:^0.1.0-alpha --dev
+composer require cwilsn/laravel-aws-sso:^1.0 --dev
 ```
 
-The stability flag is required while this is an alpha — Composer will not resolve a pre-release version under the default `minimum-stability: stable`.
+The service provider is auto-discovered. Install this package as a dev dependency; it is not intended for deployed applications.
 
-Install it as a **dev dependency**. Its only job is improving local developer authentication; it has no place in a deployed application.
+### 3. Configure your environment
 
-The service provider is auto-discovered. There is nothing to register and nothing to publish.
-
-### Step 3 — Update your `.env`
-
-Remove any static credentials:
+Remove static credentials from `.env`:
 
 ```diff
 - AWS_ACCESS_KEY_ID=AKIA...
 - AWS_SECRET_ACCESS_KEY=...
 ```
 
-Add your profile:
+Set the profile you configured:
 
 ```dotenv
 AWS_PROFILE=my-dev-profile
-```
-
-Keep the rest of your normal AWS settings:
-
-```dotenv
 AWS_DEFAULT_REGION=us-east-1
-AWS_BUCKET=my-development-bucket
 ```
 
-`AWS_PROFILE` is the standard variable understood by the AWS CLI, the AWS SDK for PHP, and this package. One value drives all three.
-
-> Laravel enables Dotenv's `PutenvAdapter` by default, so a value set in `.env` is visible to libraries that resolve it through `getenv()` — which is how the AWS SDK finds it.
-
-### Step 4 — Run Laravel
+Then start Laravel normally:
 
 ```bash
 php artisan dev
 ```
 
-That's the whole setup. Your existing AWS code keeps working unchanged, now backed by short-lived credentials:
-
-```php
-Storage::disk('s3')->put('example.txt', 'Hello');
-```
-
----
-
-## How it works
-
-The package uses two Laravel extension points and leaves the native `dev` command untouched. An `Illuminate\Console\Events\CommandStarting` listener performs the fail-fast check immediately before `dev` starts. A vendor-priority `Illuminate\Foundation\DevCommands` process named `aws-sso` then runs beside Laravel's server, queue, logs, and Vite processes for the lifetime of the development session. An application-defined process with the same name retains Laravel's higher userland priority.
-
-```text
-php artisan dev
-      │
-      ▼
-Laravel boots normally
-      │
-      ▼
-CommandStarting('dev')
-      │
-      ├─▶ is the package enabled, in a guarded environment, for a guarded command?
-      ├─▶ verify no conflicting static AWS credentials
-      ├─▶ verify the AWS CLI is installed
-      ├─▶ aws sts get-caller-identity --profile <profile>
-      │     └─ fails? ─▶ aws sso login --profile <profile> ─▶ verify again
-      ├─▶ check the optional account / role guardrails
-      │
-      ▼
-Laravel's native dev command starts
-      │
-      ├─▶ server / queue / logs / Vite
-      │
-      └─▶ aws-sso watcher
-              └─ every 60s ─▶ repeat the identity and guardrail checks
-                                   └─ expired? ─▶ select the tab and press r to sign in
-```
-
-Authentication state is determined by making a **real API call** (`aws sts get-caller-identity`), which validates the whole chain at once: the CLI is present, the profile exists, its SSO configuration is valid, the cached Identity Center session is usable or refreshable, and role credentials can actually be obtained.
-
-The package never reads `~/.aws/sso/cache`, never computes expiry timestamps itself, and never touches your AWS configuration files. The AWS CLI already refreshes role credentials automatically while the underlying Identity Center session is alive; a browser login is only started when it genuinely cannot be refreshed.
-
-If authentication fails, the exception propagates and `php artisan dev` does not start. You never end up with a running app that quietly has no AWS access.
-
-After startup, the `aws-sso` companion process repeats the same real API check at the configured interval, but background checks never open a browser. If the underlying Identity Center session expires, select the `aws-sso` tab and press `r`. Laravel's process UI restarts that tab, which immediately opens the browser login and resumes monitoring after verifying the new identity. If you use stream/inline output without tab shortcuts, run `php artisan aws-sso:login` in another terminal instead; the watcher notices when the session becomes usable again. A failed or abandoned login leaves the watcher waiting instead of repeatedly opening browser windows, and it never tears down the rest of the development processes.
-
----
+The first run may open the Identity Center login page. Later runs start immediately while the session remains usable.
 
 ## Configuration
 
-Installation works without publishing anything. To customise:
+The defaults work without publishing anything. To customise them:
 
 ```bash
 php artisan vendor:publish --tag=aws-sso-config
 ```
 
-```php
-return [
-    // Master switch for the automatic check. The manual commands stay available.
-    'enabled' => env('AWS_SSO_ENABLED', true),
+| Option | Default | Purpose |
+|---|---|---|
+| `enabled` | `true` | Enable automatic authentication checks. |
+| `profile` | `AWS_PROFILE` or `default` | AWS CLI profile to verify. |
+| `commands` | `['dev']` | Artisan commands checked before startup. |
+| `environments` | `['local']` | Laravel environments where automatic checks run. |
+| `monitor` | `true` | Add the `aws-sso` companion process to `php artisan dev`. |
+| `monitor_interval` | `60` | Seconds between background checks. |
+| `fail_on_static_credentials` | `true` | Fail when environment access keys would override the profile. |
+| `show_identity_after_login` | `true` | Print the profile ARN after automatic login. |
+| `expected_account_id` | `null` | Require an exact AWS account ID. |
+| `expected_role` | `null` | Require an exact permission-set or role name. |
 
-    // The same profile the AWS CLI and AWS SDK use.
-    'profile' => env('AWS_PROFILE', 'default'),
+Automatic checks run only for configured commands and environments. The manual commands remain available wherever the package is installed.
 
-    // Artisan commands that require a valid session before they start.
-    'commands' => ['dev'],
+Laravel configuration caching freezes the selected profile. After changing `AWS_PROFILE`, run:
 
-    // Application environments in which the check runs.
-    'environments' => ['local'],
-
-    // Keep checking for expiry while php artisan dev is running.
-    'monitor' => env('AWS_SSO_MONITOR', true),
-
-    // Seconds between background checks.
-    'monitor_interval' => env('AWS_SSO_MONITOR_INTERVAL', 60),
-
-    // Fail closed when AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are set.
-    'fail_on_static_credentials' => true,
-
-    // Print the assumed-role ARN after an interactive login.
-    'show_identity_after_login' => true,
-
-    // Optional guardrails. Off unless configured.
-    'expected_account_id' => env('AWS_SSO_EXPECTED_ACCOUNT_ID'),
-    'expected_role' => env('AWS_SSO_EXPECTED_ROLE'),
-];
+```bash
+php artisan config:clear
 ```
-
-### Profile resolution
-
-1. `--profile` on `aws-sso:login` / `aws-sso:status`
-2. `config('aws-sso.profile')`
-3. `AWS_PROFILE`
-4. `default`
-
-### Scope
-
-The check runs only when **all** of the following hold: the application is running in the console, the package is enabled, the current environment is listed in `environments`, and the starting command is listed in `commands`.
-
-That means `php artisan migrate`, `route:list`, `test`, and `queue:work` are unaffected, no browser ever opens during an HTTP request, and nothing happens in production unless you explicitly change the configuration.
-
-Continuous monitoring is attached only to `dev`, and only when `dev` is enabled by the same command and environment scope. Set `monitor` to `false` if you want to retain the startup check without the companion process. `monitor_interval` must be a positive number of seconds; invalid values fall back to 60.
-
-Add commands you want guarded:
-
-```php
-'commands' => ['dev', 'queue:work'],
-```
-
-### Non-interactive Artisan
-
-If a login would be required but Artisan was invoked with `--no-interaction`, the package aborts rather than opening a browser nobody is watching:
-
-```text
-AWS SSO authentication is required, but Artisan is running non-interactively.
-Run `aws sso login --profile my-dev-profile` first.
-```
-
-### Static credential detection
-
-The AWS SDK for PHP checks environment credentials **before** SSO profiles in its default provider chain. That means you can sign in to SSO successfully while your application quietly keeps using stale access keys. The package detects this and fails closed:
-
-```text
-Static AWS credentials are configured in the environment.
-AWS SDKs prefer AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY over the SSO profile [my-dev-profile].
-Remove those variables from your .env so the SDK can use the profile.
-```
-
-Set `fail_on_static_credentials` to `false` to downgrade this to a warning. Credential *values* are never printed or logged — only variable names.
-
-When it is downgraded, the package still refuses to claim your application authenticated as the profile, because it will not:
-
-```text
-AWS profile [my-dev-profile] resolves to: arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_LaravelDeveloper_0a1b/you
-
-WARN  That is the identity of the profile, not the one your application will use. The AWS SDK
-      resolves the static credentials in your environment first.
-```
-
-`fail_on_static_credentials` cannot be used to downgrade the [guardrail case](#guardrails-and-static-credentials).
-
-`AWS_SESSION_TOKEN` on its own is reported by `aws-sso:status` for diagnostics but is not treated as an unsafe long-lived credential.
-
----
 
 ## Identity guardrails
 
-Both guardrails are optional and inactive unless configured.
+Pin the account and permission set your application is allowed to use:
 
 ```dotenv
 AWS_SSO_EXPECTED_ACCOUNT_ID=123456789012
 AWS_SSO_EXPECTED_ROLE=LaravelDeveloper
 ```
 
-**Account.** If STS reports a different account, authentication fails:
+- Account IDs are compared exactly.
+- Role matching is exact and case-sensitive. For Identity Center roles, use the permission-set name, such as `LaravelDeveloper`, or the complete generated role name.
+- IAM users and the account root cannot satisfy a role guardrail.
+- If `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are present, configured guardrails fail closed even when `fail_on_static_credentials` is `false`.
+- `null`, `false`, and blank strings disable a guardrail. Ensure templated environment values are non-empty when enforcement is expected.
 
-```text
-AWS profile [my-dev-profile] authenticated to account [999999999999]; expected [123456789012].
-```
-
-**Role.** Identity Center generates role names such as `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so `expected_role` is matched against the **permission set name**, recovered from the role component of the assumed-role ARN. The comparison is exact and case-sensitive:
-
-```text
-AWS profile [my-dev-profile] authenticated as an unexpected role.
-Expected permission set or role: LaravelDeveloper
-Actual permission set or role: AdministratorAccess
-Actual identity: arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_9f8e7d/you
-```
-
-Either spelling of the same role is accepted — the permission set name (`LaravelDeveloper`) or the generated role name in full (`AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`). A plain IAM role is matched by its own name.
-
-The match is deliberately **not** a substring test over the ARN. A substring test would accept any broader permission set whose name merely extends the expected one — `LaravelDeveloperAdmin` contains `LaravelDeveloper` — and would also be satisfied by a match anywhere else in the ARN, including the session name. Both cases pass a guardrail while the application runs as something other than the role you pinned.
-
-An identity that is not an assumed role at all — an IAM user, the account root — can never satisfy a role guardrail. That also catches a profile backed by long-lived keys in `~/.aws/credentials` rather than an Identity Center session.
-
-This is the cheapest way to stop yourself from running the local app as an administrator by accident. It is a guardrail, not a security boundary — the real control is the permission set itself.
-
-### Guardrails and static credentials
-
-A guardrail describes the identity your application must run as. Environment credentials come ahead of the SSO profile in the AWS SDK's chain, so while `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are set, checking the profile would assert about an identity your application is not going to use.
-
-When a guardrail is configured and static credentials are present, the package therefore **fails closed regardless of `fail_on_static_credentials`**:
-
-```text
-Static AWS credentials are configured in the environment, so the account and role guardrails cannot be enforced.
-```
-
-A guardrail that quietly does not apply is worse than no guardrail, because it reads as a passing check. Remove the variables, or unset the guardrails.
-
-### Malformed guardrail values
-
-A guardrail set to something that cannot be compared to an identity — an array, an object, `true` — is a configuration error rather than a silent no-op, so a typo cannot disable the check:
-
-```text
-The [aws-sso.expected_account_id] guardrail is configured with a bool, which cannot be compared to an AWS identity.
-Set it to a string, or to null to turn the guardrail off.
-```
-
-`null` and `false` both mean "off". Quote account IDs — an unquoted `012345678901` is an octal literal in PHP, not an account number.
-
----
+Guardrails reduce wrong-account and wrong-role mistakes, but they do not replace least-privileged IAM permissions.
 
 ## Commands
 
-### `php artisan aws-sso:login`
+### Login
 
-Authenticate on demand — useful for troubleshooting, or before running a command that isn't in the guarded list. Does nothing if the session is already valid.
+Authenticate on demand. This does nothing when the profile is already usable.
 
 ```bash
 php artisan aws-sso:login
 php artisan aws-sso:login --profile=another-profile
 ```
 
-### `php artisan aws-sso:status`
+### Status
 
-Report the current state without ever starting a browser login. Exits non-zero when authentication is not valid, so it works in a script.
+Inspect the CLI, profile, environment credentials, and current identity without opening a browser. The command exits non-zero when authentication is invalid.
 
-```text
-AWS CLI:       available
-Profile:       my-dev-profile
-Env credentials: none
-Authenticated: yes
-Account:       123456789012
-Identity:      arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_LaravelDeveloper_0a1b/you
+```bash
+php artisan aws-sso:status
+php artisan aws-sso:status --profile=another-profile
 ```
 
----
+## Session monitoring
 
-## What this package never does
+The `aws-sso` process checks the profile every 60 seconds by default. Background checks never open a browser.
 
-- Create IAM users, access keys, or permission sets.
-- Write credentials to `.env`, `~/.aws/credentials`, or anywhere else.
-- Read, copy, or parse SSO cache tokens under `~/.aws/sso/cache`.
-- Modify `~/.aws/config`, `config/filesystems.php`, queue config, mail config, or any AWS client configuration.
-- Install the AWS CLI or run `aws configure sso` for you.
-- Wrap, replace, or reimplement Laravel's `dev` command. The package only adds its vendor-priority `aws-sso` companion through Laravel's public `DevCommands` API.
-- Build shell command strings from configuration. Every AWS invocation is an argument array passed straight to `proc_open`, so a profile name can never be interpreted as shell syntax.
-- Run during HTTP requests, or in production unless you explicitly configure it to.
+If the session expires, select the `aws-sso` tab in Laravel's development UI and press `r`. If your terminal does not provide tab controls, sign in from another terminal:
 
----
+```bash
+php artisan aws-sso:login
+```
+
+The watcher resumes once the profile becomes usable. It does not stop Laravel's other development processes.
+
+## Security notes
+
+- The package never writes credentials or modifies `~/.aws/config`, `~/.aws/credentials`, or the SSO cache.
+- Static credential values are never printed; only the variable names are reported.
+- `aws sts get-caller-identity` verifies the resulting principal, not the source of its credentials. Configure the profile with `aws configure sso`; other valid credential sources can also satisfy STS.
+- The package verifies its configured CLI profile. AWS clients using explicit credentials, another profile, or a custom provider are outside that check and must be kept aligned separately.
+- AWS commands are passed to Symfony Process as argument arrays. Configuration is not concatenated into shell command strings.
+
+See [SECURITY.md](SECURITY.md) for the full security model and vulnerability reporting instructions.
 
 ## Troubleshooting
 
-### `aws` not found
+### AWS CLI not found
 
-```text
-AWS CLI v2 was not found.
-```
-
-Install [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), then run `aws configure sso`. The package will never install it for you.
+Install [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), then configure your profile with `aws configure sso`.
 
 ### Profile not found
 
@@ -407,64 +159,35 @@ Install [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-st
 aws configure sso --profile my-dev-profile
 ```
 
-`aws configure sso` is a one-time setup that requires choices the package should not make on your behalf, so it is never run automatically.
+### Laravel uses old credentials or the wrong profile
 
-### Session expired
-
-At startup, `php artisan dev` starts the login for you. If the session expires later, select the `aws-sso` tab and press `r` to sign in when you are ready. Background checks deliberately do not open a browser, so leaving the development processes running overnight cannot create an abandoned login window.
-
-If the process UI does not provide tab shortcuts, use the manual fallback in another terminal; the watcher detects the renewed session automatically:
+Remove `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from `.env`, your shell profile, and your editor environment. Check for AWS clients constructed with explicit credentials, then clear cached Laravel configuration:
 
 ```bash
-php artisan aws-sso:login
+php artisan config:clear
+php artisan aws-sso:status
 ```
 
-### Laravel still uses old credentials
-
-Check for `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in your `.env`, your shell profile (`~/.zshrc`, `~/.bashrc`), and your editor's environment. Remove them.
-
-Also check for application code that passes an explicit `credentials` array to an AWS SDK client — that bypasses the provider chain entirely. Let the SDK resolve credentials itself.
-
-Run `php artisan aws-sso:status` to see exactly which AWS variables are set.
-
 ### Wrong account or role
+
+Inspect the profile directly, correct its permission-set assignment, and consider enabling both identity guardrails:
 
 ```bash
 aws sts get-caller-identity --profile my-dev-profile
 ```
 
-Then fix the profile in `~/.aws/config` or your Identity Center permission set assignment. Consider setting `AWS_SSO_EXPECTED_ACCOUNT_ID` and `AWS_SSO_EXPECTED_ROLE` so this fails fast next time.
-
-### Signing out
-
-The AWS CLI already handles this:
+### Sign out
 
 ```bash
 aws sso logout
 ```
 
----
-
-## Testing
+## Development
 
 ```bash
-composer test
+composer check
 ```
 
-The suite never touches AWS. Every process invocation is faked, stray processes are blocked, and no test reads your `~/.aws` directory.
+The test suite never contacts AWS or reads your `~/.aws` directory.
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Security
-
-See [SECURITY.md](SECURITY.md) for the security model and how to report a vulnerability.
-
-## License
-
-The MIT License (MIT). See [LICENSE.md](LICENSE.md).
+See [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [LICENSE.md](LICENSE.md).
