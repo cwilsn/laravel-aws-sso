@@ -1,0 +1,95 @@
+<?php
+
+declare(strict_types=1);
+
+use LaravelAwsSso\Aws\AwsCli;
+use LaravelAwsSso\Support\StaticCredentials;
+use LaravelAwsSso\Tests\Fixtures\FakeAwsCli;
+
+function statusCli(FakeAwsCli $cli): FakeAwsCli
+{
+    test()->swap(AwsCli::class, $cli);
+
+    return $cli;
+}
+
+beforeEach(function (): void {
+    config(['aws-sso.profile' => 'my-dev-profile']);
+});
+
+it('succeeds and reports the identity when authenticated', function (): void {
+    statusCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('AWS CLI')
+        ->expectsOutputToContain('my-dev-profile')
+        ->expectsOutputToContain('none')
+        ->expectsOutputToContain('Authenticated')
+        // Substrings must not overlap; the first matching expectation wins.
+        ->expectsOutputToContain('Account')
+        ->expectsOutputToContain('Identity: arn:aws:sts::123456789012:assumed-role/')
+        ->assertSuccessful();
+});
+
+it('fails when the session is not usable and never starts a login', function (): void {
+    $cli = statusCli((new FakeAwsCli)->queueExpiredSession());
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('Authenticated')
+        ->assertFailed();
+
+    expect($cli->loginCalls)->toBe([]);
+});
+
+it('fails when the aws cli is missing without calling sts', function (): void {
+    $cli = statusCli(new FakeAwsCli);
+    $cli->installed = false;
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('not found')
+        ->assertFailed();
+
+    expect($cli->identityCalls)->toBe([]);
+});
+
+it('honours a profile override', function (): void {
+    $cli = statusCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:status', ['--profile' => 'another-profile'])
+        ->expectsOutputToContain('another-profile')
+        ->assertSuccessful();
+
+    expect($cli->identityCalls)->toBe(['another-profile']);
+});
+
+it('falls back to the default profile', function (): void {
+    config(['aws-sso.profile' => null]);
+    $cli = statusCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('default')
+        ->assertSuccessful();
+
+    expect($cli->identityCalls)->toBe(['default']);
+});
+
+it('names static credential variables without printing their values', function (): void {
+    $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+    $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'super-secret-value');
+    statusCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY')
+        ->doesntExpectOutputToContain('super-secret-value')
+        ->doesntExpectOutputToContain('AKIAEXAMPLE')
+        ->assertSuccessful();
+});
+
+it('reports a guardrail mismatch as a failure', function (): void {
+    config(['aws-sso.expected_account_id' => '999999999999']);
+    statusCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('authenticated to account [123456789012]; expected [999999999999]')
+        ->assertFailed();
+});

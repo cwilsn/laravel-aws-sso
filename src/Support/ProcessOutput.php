@@ -1,0 +1,45 @@
+<?php
+
+declare(strict_types=1);
+
+namespace LaravelAwsSso\Support;
+
+/**
+ * Helpers for turning raw AWS CLI output into something safe to show a developer.
+ */
+final class ProcessOutput
+{
+    private const MAX_LINES = 5;
+
+    private const MAX_CHARACTERS = 500;
+
+    /**
+     * Reduce raw CLI output to a short, trimmed excerpt.
+     *
+     * AWS CLI errors are usually one or two lines, but a stack trace or a
+     * paginated response should never be dumped into the developer's terminal.
+     */
+    public static function excerpt(string $output): string
+    {
+        $lines = preg_split('/\R/', trim($output)) ?: [];
+
+        $lines = array_values(array_filter(
+            array_map(static fn (string $line): string => rtrim($line), $lines),
+            static fn (string $line): bool => $line !== '',
+        ));
+
+        if ($lines === []) {
+            return '';
+        }
+
+        $truncated = count($lines) > self::MAX_LINES;
+        $excerpt = implode(PHP_EOL, array_slice($lines, 0, self::MAX_LINES));
+
+        if (mb_strlen($excerpt) > self::MAX_CHARACTERS) {
+            $excerpt = mb_substr($excerpt, 0, self::MAX_CHARACTERS);
+            $truncated = true;
+        }
+
+        return $truncated ? $excerpt.PHP_EOL.'...' : $excerpt;
+    }
+}
