@@ -194,3 +194,14 @@ it('always builds commands as an argument array, never a string', function (): v
     Process::assertRanTimes(fn (PendingProcess $process): bool => is_array($process->command)
         && $process->command[0] === 'aws', 3);
 });
+
+it('carries the aws exit code into the login failure', function (): void {
+    Process::fake([LOGIN_COMMAND => Process::result(
+        output: '',
+        errorOutput: 'Error loading SSO Token: Token for does not exist',
+        exitCode: 253,
+    )]);
+
+    expect(fn () => awsCli()->login('my-dev-profile'))
+        ->toThrow(AwsAuthenticationFailed::class, 'could not be authenticated (exit code 253)');
+});
