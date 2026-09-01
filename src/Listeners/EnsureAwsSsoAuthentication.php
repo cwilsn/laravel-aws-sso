@@ -38,9 +38,10 @@ final readonly class EnsureAwsSsoAuthentication
             interactive: $this->isInteractive($event->input),
         );
 
-        // Stay silent when the session was already valid.
+        // Stay silent when the session was already valid. The shadowed case has
+        // already warned through the same output during the check.
         if ($result->reauthenticated) {
-            $event->output->writeln('<info>'.$this->successMessage($result).'</info>');
+            $event->output->writeln($this->successMessage($result));
         }
     }
 
@@ -54,13 +55,20 @@ final readonly class EnsureAwsSsoAuthentication
 
     private function successMessage(AuthenticationResult $result): string
     {
-        $message = "AWS authenticated with [{$result->profile}]";
+        // When static credentials shadow the profile the identity belongs to the
+        // profile, not to the application, so it is never announced as the one
+        // the application authenticated with.
+        $message = $result->shadowedByStaticCredentials
+            ? "AWS profile [{$result->profile}] signed in, but your application will use the static credentials in your environment"
+            : "AWS authenticated with [{$result->profile}]";
+
+        $style = $result->shadowedByStaticCredentials ? 'comment' : 'info';
 
         if (! $this->config->get('aws-sso.show_identity_after_login', true)) {
-            return $message.'.';
+            return "<{$style}>{$message}.</{$style}>";
         }
 
-        return $message.': '.$result->identity->arn;
+        return "<{$style}>{$message}:</{$style}> ".$result->identity->arn;
     }
 
     /**
@@ -76,11 +84,22 @@ final readonly class EnsureAwsSsoAuthentication
     }
 
     /**
+     * Read a scope list from configuration.
+     *
+     * A bare string is accepted as a single-entry list. Reading `'dev'` as an
+     * empty list would silently skip the check everywhere, and a scope that
+     * quietly covers nothing is the one failure mode this listener must not
+     * have.
+     *
      * @return list<string>
      */
     private function list(string $key): array
     {
         $values = $this->config->get($key, []);
+
+        if (is_string($values)) {
+            return $values === '' ? [] : [$values];
+        }
 
         if (! is_array($values)) {
             return [];

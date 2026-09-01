@@ -66,6 +66,10 @@ return [
     | before it reads SSO profiles, so leftover keys silently beat a fresh SSO
     | session. Fail closed by default; set to false to warn and continue.
     |
+    | This does not apply when a guardrail below is configured. A guardrail
+    | checked against a profile the SDK will not use reads as a passing check
+    | while describing the wrong identity, so that combination always fails.
+    |
     */
 
     'fail_on_static_credentials' => true,
@@ -88,7 +92,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Optional guardrail. When set, authentication fails unless STS reports
-    | this exact AWS account ID.
+    | this exact AWS account ID. Quote it: an unquoted 012345678901 is an
+    | octal literal, not an account number. Use null or false to turn it off.
     |
     */
 
@@ -99,10 +104,14 @@ return [
     | Expected Role
     |--------------------------------------------------------------------------
     |
-    | Optional guardrail. When set, the assumed-role ARN reported by STS must
-    | contain this string. Identity Center generates role names such as
-    | `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so use the permission set
-    | name rather than a full ARN.
+    | Optional guardrail. When set, the role STS reports must be exactly this
+    | one. Identity Center generates role names such as
+    | `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so either the permission
+    | set name (`LaravelDeveloper`) or that generated name in full is accepted.
+    |
+    | The comparison is against the role itself, not a substring of the ARN: a
+    | substring would also accept `LaravelDeveloperAdmin`. Use null or false to
+    | turn it off.
     |
     */
 

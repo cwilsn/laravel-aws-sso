@@ -123,6 +123,19 @@ it('reports a role guardrail mismatch as a failure', function (): void {
     config(['aws-sso.expected_role' => 'AdministratorAccess']);
 
     $this->artisan('aws-sso:status')
-        ->expectsOutputToContain('Expected role to contain: AdministratorAccess')
+        ->expectsOutputToContain('Expected permission set or role: AdministratorAccess')
+        ->assertFailed();
+});
+
+it('fails when static credentials make a guardrail unenforceable', function (): void {
+    statusCli(FakeAwsCli::authenticated());
+    $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+    $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'secret');
+    config(['aws-sso.expected_account_id' => '123456789012']);
+
+    // The account matches, but it is the profile's account rather than the one
+    // the application will use, so a pass here would be reporting the wrong thing.
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('guardrails cannot be enforced')
         ->assertFailed();
 });

@@ -9,6 +9,7 @@ use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Aws\AwsIdentity;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\InvalidGuardrailConfiguration;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
 use LaravelAwsSso\Exceptions\UnexpectedAwsRole;
@@ -55,6 +56,7 @@ final readonly class AwsSsoAuthenticator
      * @throws AwsAuthenticationFailed
      * @throws UnexpectedAwsAccount
      * @throws UnexpectedAwsRole
+     * @throws InvalidGuardrailConfiguration
      */
     public function ensureAuthenticated(
         ?string $profile = null,
@@ -63,7 +65,7 @@ final readonly class AwsSsoAuthenticator
     ): AuthenticationResult {
         $profile = $this->profile($profile);
 
-        $this->guardStaticCredentials($profile, $output);
+        $shadowed = $this->guardStaticCredentials($profile, $output);
 
         if (! $this->cli->isInstalled()) {
             throw AwsCliNotFound::make();
@@ -79,7 +81,7 @@ final readonly class AwsSsoAuthenticator
 
         $this->verify($identity, $profile);
 
-        return new AuthenticationResult($profile, $identity, $reauthenticated);
+        return new AuthenticationResult($profile, $identity, $reauthenticated, $shadowed);
     }
 
     /**
@@ -109,6 +111,7 @@ final readonly class AwsSsoAuthenticator
      *
      * @throws UnexpectedAwsAccount
      * @throws UnexpectedAwsRole
+     * @throws InvalidGuardrailConfiguration
      */
     public function verify(AwsIdentity $identity, string $profile): void
     {
@@ -120,12 +123,26 @@ final readonly class AwsSsoAuthenticator
 
         $expectedRole = $this->expected('aws-sso.expected_role');
 
-        // Identity Center generates role names such as
-        // `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so the permission set
-        // name is matched as a substring of the assumed-role ARN.
-        if ($expectedRole !== null && ! str_contains($identity->arn, $expectedRole)) {
-            throw UnexpectedAwsRole::make($profile, $identity->arn, $expectedRole);
+        if ($expectedRole !== null && ! $this->roleMatches($identity, $expectedRole)) {
+            throw UnexpectedAwsRole::make($profile, $identity, $expectedRole);
         }
+    }
+
+    /**
+     * Whether an identity is running as exactly the expected permission set.
+     *
+     * The comparison is against the role component of the ARN alone, never the
+     * whole ARN. A substring test over the ARN would also match the account id
+     * and the session name, and would accept any broader permission set whose
+     * name merely starts with the expected one — `LaravelDeveloperAdmin`
+     * contains `LaravelDeveloper`. Both spellings of the same role are
+     * accepted: the Identity Center permission set name and the generated
+     * `AWSReservedSSO_<permission set>_<suffix>` role name.
+     */
+    private function roleMatches(AwsIdentity $identity, string $expected): bool
+    {
+        return $expected === $identity->permissionSetName()
+            || $expected === $identity->roleName();
     }
 
     /**
@@ -146,27 +163,72 @@ final readonly class AwsSsoAuthenticator
     }
 
     /**
+     * Decide whether to continue when static credentials shadow the profile.
+     *
+     * Returns true when the run is continuing even though the AWS SDK will
+     * resolve environment credentials rather than the profile, so callers can
+     * report the identity honestly instead of implying the application is
+     * running as the profile.
+     *
      * @throws StaticCredentialsDetected
+     * @throws InvalidGuardrailConfiguration
      */
-    private function guardStaticCredentials(string $profile, ?OutputInterface $output): void
+    private function guardStaticCredentials(string $profile, ?OutputInterface $output): bool
     {
         if (! $this->staticCredentials->detected()) {
-            return;
+            return false;
         }
 
         if ($this->config->get('aws-sso.fail_on_static_credentials', true)) {
             throw StaticCredentialsDetected::make($profile);
         }
 
+        // A guardrail that cannot be enforced fails closed. Verifying the
+        // profile here would assert about an identity the application is not
+        // going to use, which is worse than no guardrail at all because it
+        // reads as a passing check.
+        if ($this->guardrailsConfigured()) {
+            throw StaticCredentialsDetected::shadowingGuardrails($profile);
+        }
+
         $output?->writeln('<comment>'.$this->staticCredentials->shadowWarning($profile).'</comment>');
+
+        return true;
     }
 
+    /**
+     * Whether either identity guardrail is switched on.
+     *
+     * Public so a caller that verifies an identity directly can tell whether a
+     * guardrail is in play before trusting the result.
+     *
+     * @throws InvalidGuardrailConfiguration
+     */
+    public function guardrailsConfigured(): bool
+    {
+        return $this->expected('aws-sso.expected_account_id') !== null
+            || $this->expected('aws-sso.expected_role') !== null;
+    }
+
+    /**
+     * Read a guardrail value, treating an unusable one as a configuration error.
+     *
+     * `null` and `false` are the two ways of spelling "guardrail off"; anything
+     * else that cannot become a comparable string is a mistake. Returning null
+     * for it would silently disable a security control, so it throws instead.
+     *
+     * @throws InvalidGuardrailConfiguration
+     */
     private function expected(string $key): ?string
     {
         $value = $this->config->get($key);
 
-        if (! is_scalar($value) || is_bool($value)) {
+        if ($value === null || $value === false) {
             return null;
+        }
+
+        if (! is_scalar($value) || is_bool($value)) {
+            throw InvalidGuardrailConfiguration::make($key, get_debug_type($value));
         }
 
         $value = trim((string) $value);

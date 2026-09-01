@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Exceptions\LaravelAwsSsoException;
+use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Support\StaticCredentials;
 
 /**
@@ -50,6 +51,13 @@ final class StatusCommand extends Command
         try {
             $identity = $cli->identity($profile);
             $authenticator->verify($identity, $profile);
+
+            // `verify()` describes the profile. When environment credentials
+            // shadow it, that is not the identity the application will use, so
+            // a passing guardrail here would be reporting on the wrong thing.
+            if ($staticCredentials->detected() && $authenticator->guardrailsConfigured()) {
+                throw StaticCredentialsDetected::shadowingGuardrails($profile);
+            }
         } catch (LaravelAwsSsoException $e) {
             $this->components->twoColumnDetail('Authenticated', '<fg=red>no</>');
             $this->newLine();

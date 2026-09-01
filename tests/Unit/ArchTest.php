@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\InvalidGuardrailConfiguration;
 use LaravelAwsSso\Exceptions\LaravelAwsSsoException;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
@@ -24,6 +25,7 @@ arch('exceptions are final and marked as ours')
     ->expect([
         AwsAuthenticationFailed::class,
         AwsCliNotFound::class,
+        InvalidGuardrailConfiguration::class,
         StaticCredentialsDetected::class,
         UnexpectedAwsAccount::class,
         UnexpectedAwsRole::class,
