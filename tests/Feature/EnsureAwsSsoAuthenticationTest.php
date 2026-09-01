@@ -3,13 +3,14 @@
 declare(strict_types=1);
 
 use Illuminate\Console\Events\CommandStarting;
-use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Listeners\EnsureAwsSsoAuthentication;
+use LaravelAwsSso\Support\AuthenticationMessage;
+use LaravelAwsSso\Support\AutomaticAuthentication;
 use LaravelAwsSso\Support\StaticCredentials;
 use LaravelAwsSso\Tests\Fixtures\FakeAwsCli;
 use Symfony\Component\Console\Input\ArgvInput;
@@ -93,8 +94,8 @@ describe('scope', function (): void {
 
         $listener = new EnsureAwsSsoAuthentication(
             app(AwsSsoAuthenticator::class),
-            app(Repository::class),
-            $app,
+            new AutomaticAuthentication(config(), $app),
+            app(AuthenticationMessage::class),
         );
 
         $listener->handle(new CommandStarting('dev', new ArrayInput([]), new BufferedOutput));

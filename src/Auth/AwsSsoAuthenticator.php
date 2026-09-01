@@ -62,10 +62,11 @@ final readonly class AwsSsoAuthenticator
         ?string $profile = null,
         ?OutputInterface $output = null,
         bool $interactive = true,
+        bool $warnAboutStaticCredentials = true,
     ): AuthenticationResult {
         $profile = $this->profile($profile);
 
-        $shadowed = $this->guardStaticCredentials($profile, $output);
+        $shadowed = $this->guardStaticCredentials($profile, $output, $warnAboutStaticCredentials);
 
         if (! $this->cli->isInstalled()) {
             throw AwsCliNotFound::make();
@@ -173,8 +174,11 @@ final readonly class AwsSsoAuthenticator
      * @throws StaticCredentialsDetected
      * @throws InvalidGuardrailConfiguration
      */
-    private function guardStaticCredentials(string $profile, ?OutputInterface $output): bool
-    {
+    private function guardStaticCredentials(
+        string $profile,
+        ?OutputInterface $output,
+        bool $warnAboutStaticCredentials,
+    ): bool {
         if (! $this->staticCredentials->detected()) {
             return false;
         }
@@ -191,7 +195,9 @@ final readonly class AwsSsoAuthenticator
             throw StaticCredentialsDetected::shadowingGuardrails($profile);
         }
 
-        $output?->writeln('<comment>'.$this->staticCredentials->shadowWarning($profile).'</comment>');
+        if ($warnAboutStaticCredentials) {
+            $output?->writeln('<comment>'.$this->staticCredentials->shadowWarning($profile).'</comment>');
+        }
 
         return true;
     }

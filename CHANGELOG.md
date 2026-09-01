@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added an `aws-sso` companion process to Laravel's native `dev` process list. It checks the configured profile every 60 seconds by default. When a session expires, the tab waits without opening a browser; select it and press `r` to sign in when you return, without restarting `php artisan dev`.
+- Added `monitor` and `monitor_interval` configuration options for disabling the companion process or changing its check interval.
+- Raised the minimum Laravel version from 13.16 to 13.18, which introduced priority-based vendor registration for development processes.
+
 ### Documentation
 
 - Corrected the binary-resolution trust assumption in `SECURITY.md`. It described the `aws` executable as resolved through `PATH`, which understates the behaviour on Windows: Symfony's Process component bypasses the shell, so `CreateProcess` resolves the name and searches the current directory — the Laravel project root — ahead of `PATH`. No code change; the behaviour is unchanged and documented as a known, unmitigated trust assumption.

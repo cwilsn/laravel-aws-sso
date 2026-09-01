@@ -21,10 +21,10 @@
     ],
     "require": {
         "php": "^8.3",
-        "illuminate/console": "^13.16",
-        "illuminate/contracts": "^13.16",
-        "illuminate/process": "^13.16",
-        "illuminate/support": "^13.16",
+        "illuminate/console": "^13.18",
+        "illuminate/contracts": "^13.18",
+        "illuminate/process": "^13.18",
+        "illuminate/support": "^13.18",
         "symfony/console": "^7.4 || ^8.0",
         "symfony/process": "^7.4.5 || ^8.0.5"
     },

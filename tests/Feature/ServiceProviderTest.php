@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\ServiceProvider;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsCli;
@@ -16,6 +17,8 @@ it('merges the package configuration without publishing', function (): void {
     expect(config('aws-sso.commands'))->toBe(['dev'])
         ->and(config('aws-sso.environments'))->toBe(['local'])
         ->and(config('aws-sso.enabled'))->toBeTrue()
+        ->and(config('aws-sso.monitor'))->toBeTrue()
+        ->and(config('aws-sso.monitor_interval'))->toBe(60)
         ->and(config('aws-sso.fail_on_static_credentials'))->toBeTrue()
         ->and(config('aws-sso.show_identity_after_login'))->toBeTrue()
         ->and(config('aws-sso.expected_account_id'))->toBeNull()
@@ -42,7 +45,19 @@ it('registers the artisan commands', function (): void {
     $commands = array_keys(app(Kernel::class)->all());
 
     expect($commands)->toContain('aws-sso:login')
-        ->and($commands)->toContain('aws-sso:status');
+        ->and($commands)->toContain('aws-sso:status')
+        ->and($commands)->toContain('aws-sso:watch');
+});
+
+it('registers the session watcher as a native dev process in an enabled environment', function (): void {
+    $this->app['env'] = 'local';
+
+    (new LaravelAwsSsoServiceProvider($this->app))->boot();
+
+    $commands = collect(DevCommands::commands())->keyBy('name');
+
+    expect($commands)->toHaveKey('aws-sso')
+        ->and($commands['aws-sso']['command'])->toBe('php artisan aws-sso:watch');
 });
 
 it('publishes the configuration under a stable tag', function (): void {

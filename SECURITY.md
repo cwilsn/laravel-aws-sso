@@ -23,7 +23,7 @@ Understanding what this package does and does not protect is the point of this s
 ### What the package handles
 
 - It verifies that a named AWS profile has a usable IAM Identity Center session by calling `aws sts get-caller-identity`.
-- It starts `aws sso login` when that session can no longer be refreshed.
+- It starts `aws sso login` when that session can no longer be refreshed, both before `php artisan dev` starts and from its background companion process while `dev` remains running.
 - It optionally asserts that the resulting identity belongs to an expected AWS account and permission set.
 - It detects static environment credentials that would silently take precedence over the SSO profile.
 
@@ -58,7 +58,7 @@ When static credentials are tolerated and no guardrail is configured, the packag
   How that name resolves is platform-dependent, and on Windows it is not simply `PATH`. Symfony's Process component runs with `bypass_shell` enabled, so the name is resolved by `CreateProcess`, whose search order places **the current directory ahead of `PATH`**. Artisan's current directory is the Laravel project root, so an `aws.exe` sitting in a project root would be preferred over the installed AWS CLI. (Only `.exe` — bypassing the shell means `aws.bat` and `aws.cmd` are not candidates.) On Linux and macOS the current directory is not searched unless `PATH` itself contains `.`.
 
   This is known and not currently mitigated. In practice it is bounded by the fact that reaching it means running `composer install` and booting the project's service providers from an untrusted repository, both of which already execute arbitrary code well before the AWS CLI is invoked. A future version may give the subprocess a neutral working directory, which costs nothing — the AWS CLI reads its configuration from `~/.aws` and does not depend on where it runs.
-- Guardrails constrain what this package will let start. They do not constrain what the application does afterwards — the AWS SDK resolves credentials independently on every call.
+- Guardrails constrain what this package will let start and what identities its periodic monitor accepts. They do not constrain what the application does between checks — the AWS SDK resolves credentials independently on every call.
 
 ### This package does not make your AWS permissions safe
 

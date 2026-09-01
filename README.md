@@ -4,7 +4,7 @@
 
 > **Alpha.** This is `v0.1.0-alpha.1`. It is being used and tested in anger, but the API may change before 1.0 and the configuration keys are not yet frozen. Feedback and bug reports are welcome.
 
-Stop storing long-lived AWS access keys in your Laravel `.env`. Laravel AWS SSO ensures your IAM Identity Center session is valid when `php artisan dev` starts, and only asks you to sign in when necessary.
+Stop storing long-lived AWS access keys in your Laravel `.env`. Laravel AWS SSO ensures your IAM Identity Center session is valid when `php artisan dev` starts, keeps checking it while your development processes run, and only asks you to sign in when necessary.
 
 ```bash
 # First run of the day
@@ -16,7 +16,15 @@ AWS authenticated with [my-dev-profile]: arn:aws:sts::123456789012:assumed-role/
 
 # Every run after that
 $ php artisan dev
-# Laravel's dev UI starts immediately. No AWS noise.
+# Laravel's dev UI starts immediately. An aws-sso process quietly keeps watch.
+
+# If the session expires later
+AWS SSO session [my-dev-profile] is no longer usable.
+Select the aws-sso tab and press r to sign in.
+
+# When you return, select that tab and press r
+AWS SSO session for [my-dev-profile] has expired. Signing in...
+# The browser login opens without restarting php artisan dev.
 ```
 
 ---
@@ -73,7 +81,7 @@ Your Identity Center user
 | | |
 |---|---|
 | PHP | `^8.3` |
-| Laravel | `^13.16` (the release that introduced `php artisan dev`) |
+| Laravel | `^13.18` (the release that added priority-based vendor registration to `php artisan dev`) |
 | AWS CLI | v2, with IAM Identity Center support |
 
 This package does **not** require `aws/aws-sdk-php`. It talks to the AWS CLI only; your application keeps whatever AWS SDK dependencies it already has.
@@ -152,7 +160,7 @@ Storage::disk('s3')->put('example.txt', 'Hello');
 
 ## How it works
 
-Laravel 13 deliberately prevents vendor packages from registering processes with `Illuminate\Foundation\DevCommands`, so this package leaves the native `dev` command completely alone. It listens for `Illuminate\Console\Events\CommandStarting` instead, which Laravel dispatches immediately before an Artisan command executes.
+The package uses two Laravel extension points and leaves the native `dev` command untouched. An `Illuminate\Console\Events\CommandStarting` listener performs the fail-fast check immediately before `dev` starts. A vendor-priority `Illuminate\Foundation\DevCommands` process named `aws-sso` then runs beside Laravel's server, queue, logs, and Vite processes for the lifetime of the development session. An application-defined process with the same name retains Laravel's higher userland priority.
 
 ```text
 php artisan dev
@@ -172,6 +180,12 @@ CommandStarting('dev')
       │
       ▼
 Laravel's native dev command starts
+      │
+      ├─▶ server / queue / logs / Vite
+      │
+      └─▶ aws-sso watcher
+              └─ every 60s ─▶ repeat the identity and guardrail checks
+                                   └─ expired? ─▶ select the tab and press r to sign in
 ```
 
 Authentication state is determined by making a **real API call** (`aws sts get-caller-identity`), which validates the whole chain at once: the CLI is present, the profile exists, its SSO configuration is valid, the cached Identity Center session is usable or refreshable, and role credentials can actually be obtained.
@@ -179,6 +193,8 @@ Authentication state is determined by making a **real API call** (`aws sts get-c
 The package never reads `~/.aws/sso/cache`, never computes expiry timestamps itself, and never touches your AWS configuration files. The AWS CLI already refreshes role credentials automatically while the underlying Identity Center session is alive; a browser login is only started when it genuinely cannot be refreshed.
 
 If authentication fails, the exception propagates and `php artisan dev` does not start. You never end up with a running app that quietly has no AWS access.
+
+After startup, the `aws-sso` companion process repeats the same real API check at the configured interval, but background checks never open a browser. If the underlying Identity Center session expires, select the `aws-sso` tab and press `r`. Laravel's process UI restarts that tab, which immediately opens the browser login and resumes monitoring after verifying the new identity. If you use stream/inline output without tab shortcuts, run `php artisan aws-sso:login` in another terminal instead; the watcher notices when the session becomes usable again. A failed or abandoned login leaves the watcher waiting instead of repeatedly opening browser windows, and it never tears down the rest of the development processes.
 
 ---
 
@@ -204,6 +220,12 @@ return [
     // Application environments in which the check runs.
     'environments' => ['local'],
 
+    // Keep checking for expiry while php artisan dev is running.
+    'monitor' => env('AWS_SSO_MONITOR', true),
+
+    // Seconds between background checks.
+    'monitor_interval' => env('AWS_SSO_MONITOR_INTERVAL', 60),
+
     // Fail closed when AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are set.
     'fail_on_static_credentials' => true,
 
@@ -228,6 +250,8 @@ return [
 The check runs only when **all** of the following hold: the application is running in the console, the package is enabled, the current environment is listed in `environments`, and the starting command is listed in `commands`.
 
 That means `php artisan migrate`, `route:list`, `test`, and `queue:work` are unaffected, no browser ever opens during an HTTP request, and nothing happens in production unless you explicitly change the configuration.
+
+Continuous monitoring is attached only to `dev`, and only when `dev` is enabled by the same command and environment scope. Set `monitor` to `false` if you want to retain the startup check without the companion process. `monitor_interval` must be a positive number of seconds; invalid values fall back to 60.
 
 Add commands you want guarded:
 
@@ -361,7 +385,7 @@ Identity:      arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_LaravelDeve
 - Read, copy, or parse SSO cache tokens under `~/.aws/sso/cache`.
 - Modify `~/.aws/config`, `config/filesystems.php`, queue config, mail config, or any AWS client configuration.
 - Install the AWS CLI or run `aws configure sso` for you.
-- Register a vendor `DevCommands` process, or wrap, replace, or reimplement Laravel's `dev` command.
+- Wrap, replace, or reimplement Laravel's `dev` command. The package only adds its vendor-priority `aws-sso` companion through Laravel's public `DevCommands` API.
 - Build shell command strings from configuration. Every AWS invocation is an argument array passed straight to `proc_open`, so a profile name can never be interpreted as shell syntax.
 - Run during HTTP requests, or in production unless you explicitly configure it to.
 
@@ -387,10 +411,12 @@ aws configure sso --profile my-dev-profile
 
 ### Session expired
 
-No action needed — `php artisan dev` starts the login for you. Manual fallback:
+At startup, `php artisan dev` starts the login for you. If the session expires later, select the `aws-sso` tab and press `r` to sign in when you are ready. Background checks deliberately do not open a browser, so leaving the development processes running overnight cannot create an abandoned login window.
+
+If the process UI does not provide tab shortcuts, use the manual fallback in another terminal; the watcher detects the renewed session automatically:
 
 ```bash
-aws sso login --profile my-dev-profile
+php artisan aws-sso:login
 ```
 
 ### Laravel still uses old credentials

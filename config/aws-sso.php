@@ -59,6 +59,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Continuous Session Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Add a lightweight companion process to `php artisan dev` that periodically
+    | checks the configured profile. If the session expires, select its aws-sso
+    | tab and press `r` to restart it and open a new browser login.
+    |
+    */
+
+    'monitor' => env('AWS_SSO_MONITOR', true),
+
+    // Seconds between checks. Invalid or non-positive values fall back to 60.
+    'monitor_interval' => env('AWS_SSO_MONITOR_INTERVAL', 60),
+
+    /*
+    |--------------------------------------------------------------------------
     | Fail On Static Credentials
     |--------------------------------------------------------------------------
     |

@@ -64,4 +64,4 @@ This project follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Supported versions
 
-`composer.json` allows Laravel `^13.16`, the release that introduced `php artisan dev`. Orchestra Testbench 11 requires Laravel `^13.23`, so CI's `--prefer-lowest` job exercises 13.23 rather than 13.16. If you have a way to test the 13.16–13.22 range, contributions are welcome.
+`composer.json` allows Laravel `^13.18`, the release that added priority-based vendor registration to `php artisan dev`. Orchestra Testbench 11 requires Laravel `^13.23`, so CI's `--prefer-lowest` job exercises 13.23 rather than 13.18. If you have a way to test the 13.18–13.22 range, contributions are welcome.
