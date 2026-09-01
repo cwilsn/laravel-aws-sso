@@ -102,11 +102,44 @@ describe('scope', function (): void {
         expect($cli->identityCalls)->toBe([]);
     });
 
-    it('tolerates non-list configuration values', function (): void {
-        config(['aws-sso.commands' => 'dev', 'aws-sso.environments' => 'local']);
+    it('tolerates configuration values that have no list reading', function (mixed $value): void {
+        config(['aws-sso.commands' => $value, 'aws-sso.environments' => $value]);
         $cli = fakeCli(new FakeAwsCli);
 
         startCommand();
+
+        expect($cli->identityCalls)->toBe([]);
+    })->with([
+        'int' => [1],
+        'bool' => [true],
+        'object' => [new stdClass],
+        'empty string' => [''],
+        'list of non-strings' => [[1, 2]],
+    ]);
+
+    it('treats a single configured command as a one-entry list, not as no scope', function (): void {
+        config(['aws-sso.commands' => 'dev']);
+        $cli = fakeCli(FakeAwsCli::authenticated());
+
+        startCommand('dev');
+
+        expect($cli->identityCalls)->toBe(['my-dev-profile']);
+    });
+
+    it('treats a single configured environment as a one-entry list, not as no scope', function (): void {
+        config(['aws-sso.environments' => 'local']);
+        $cli = fakeCli(FakeAwsCli::authenticated());
+
+        startCommand('dev');
+
+        expect($cli->identityCalls)->toBe(['my-dev-profile']);
+    });
+
+    it('still scopes correctly when a bare string does not match', function (): void {
+        config(['aws-sso.commands' => 'queue:work']);
+        $cli = fakeCli(new FakeAwsCli);
+
+        startCommand('dev');
 
         expect($cli->identityCalls)->toBe([]);
     });

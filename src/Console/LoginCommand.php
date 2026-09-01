@@ -32,7 +32,18 @@ final class LoginCommand extends Command
             return self::FAILURE;
         }
 
-        // Written as a plain line so long assumed-role ARNs are not truncated.
+        // Written as plain lines so long assumed-role ARNs are not truncated.
+        if ($result->shadowedByStaticCredentials) {
+            $this->line("<comment>AWS profile [{$result->profile}] resolves to:</comment> {$result->identity->arn}");
+            $this->newLine();
+            $this->components->warn(
+                'That is the identity of the profile, not the one your application will use. '
+                .'The AWS SDK resolves the static credentials in your environment first.'
+            );
+
+            return self::SUCCESS;
+        }
+
         $this->line("<info>AWS authenticated with [{$result->profile}]:</info> {$result->identity->arn}");
 
         return self::SUCCESS;

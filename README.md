@@ -2,6 +2,8 @@
 
 **Seamless AWS IAM Identity Center authentication for local Laravel development.**
 
+> **Alpha.** This is `v0.1.0-alpha.1`. It is being used and tested in anger, but the API may change before 1.0 and the configuration keys are not yet frozen. Feedback and bug reports are welcome.
+
 Stop storing long-lived AWS access keys in your Laravel `.env`. Laravel AWS SSO ensures your IAM Identity Center session is valid when `php artisan dev` starts, and only asks you to sign in when necessary.
 
 ```bash
@@ -27,6 +29,7 @@ $ php artisan dev
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
 - [Identity guardrails](#identity-guardrails)
+  - [Guardrails and static credentials](#guardrails-and-static-credentials)
 - [Commands](#commands)
 - [What this package never does](#what-this-package-never-does)
 - [Troubleshooting](#troubleshooting)
@@ -98,8 +101,10 @@ aws sts get-caller-identity --profile my-dev-profile
 ### Step 2 — Install the package
 
 ```bash
-composer require cwilsn/laravel-aws-sso --dev
+composer require cwilsn/laravel-aws-sso:^0.1.0-alpha --dev
 ```
+
+The stability flag is required while this is an alpha — Composer will not resolve a pre-release version under the default `minimum-stability: stable`.
 
 Install it as a **dev dependency**. Its only job is improving local developer authentication; it has no place in a deployed application.
 
@@ -251,6 +256,17 @@ Remove those variables from your .env so the SDK can use the profile.
 
 Set `fail_on_static_credentials` to `false` to downgrade this to a warning. Credential *values* are never printed or logged — only variable names.
 
+When it is downgraded, the package still refuses to claim your application authenticated as the profile, because it will not:
+
+```text
+AWS profile [my-dev-profile] resolves to: arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_LaravelDeveloper_0a1b/you
+
+WARN  That is the identity of the profile, not the one your application will use. The AWS SDK
+      resolves the static credentials in your environment first.
+```
+
+`fail_on_static_credentials` cannot be used to downgrade the [guardrail case](#guardrails-and-static-credentials).
+
 `AWS_SESSION_TOKEN` on its own is reported by `aws-sso:status` for diagnostics but is not treated as an unsafe long-lived credential.
 
 ---
@@ -270,15 +286,45 @@ AWS_SSO_EXPECTED_ROLE=LaravelDeveloper
 AWS profile [my-dev-profile] authenticated to account [999999999999]; expected [123456789012].
 ```
 
-**Role.** Identity Center generates role names such as `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so a literal ARN comparison is useless. `expected_role` is matched as a **case-sensitive substring of the assumed-role ARN** — use the permission set name:
+**Role.** Identity Center generates role names such as `AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`, so `expected_role` is matched against the **permission set name**, recovered from the role component of the assumed-role ARN. The comparison is exact and case-sensitive:
 
 ```text
 AWS profile [my-dev-profile] authenticated as an unexpected role.
-Expected role to contain: LaravelDeveloper
+Expected permission set or role: LaravelDeveloper
+Actual permission set or role: AdministratorAccess
 Actual identity: arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_9f8e7d/you
 ```
 
+Either spelling of the same role is accepted — the permission set name (`LaravelDeveloper`) or the generated role name in full (`AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f`). A plain IAM role is matched by its own name.
+
+The match is deliberately **not** a substring test over the ARN. A substring test would accept any broader permission set whose name merely extends the expected one — `LaravelDeveloperAdmin` contains `LaravelDeveloper` — and would also be satisfied by a match anywhere else in the ARN, including the session name. Both cases pass a guardrail while the application runs as something other than the role you pinned.
+
+An identity that is not an assumed role at all — an IAM user, the account root — can never satisfy a role guardrail. That also catches a profile backed by long-lived keys in `~/.aws/credentials` rather than an Identity Center session.
+
 This is the cheapest way to stop yourself from running the local app as an administrator by accident. It is a guardrail, not a security boundary — the real control is the permission set itself.
+
+### Guardrails and static credentials
+
+A guardrail describes the identity your application must run as. Environment credentials come ahead of the SSO profile in the AWS SDK's chain, so while `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are set, checking the profile would assert about an identity your application is not going to use.
+
+When a guardrail is configured and static credentials are present, the package therefore **fails closed regardless of `fail_on_static_credentials`**:
+
+```text
+Static AWS credentials are configured in the environment, so the account and role guardrails cannot be enforced.
+```
+
+A guardrail that quietly does not apply is worse than no guardrail, because it reads as a passing check. Remove the variables, or unset the guardrails.
+
+### Malformed guardrail values
+
+A guardrail set to something that cannot be compared to an identity — an array, an object, `true` — is a configuration error rather than a silent no-op, so a typo cannot disable the check:
+
+```text
+The [aws-sso.expected_account_id] guardrail is configured with a bool, which cannot be compared to an AWS identity.
+Set it to a string, or to null to turn the guardrail off.
+```
+
+`null` and `false` both mean "off". Quote account IDs — an unquoted `012345678901` is an octal literal in PHP, not an account number.
 
 ---
 

@@ -12,7 +12,9 @@ Please include a description of the issue, the affected version, and steps to re
 
 | Version | Supported |
 |---------|-----------|
-| 1.x     | ✅        |
+| 0.1.x   | ✅        |
+
+This package is in alpha. Until 1.0 the API may change between minor versions, and only the latest 0.1.x release receives fixes.
 
 ## Security model
 
@@ -37,6 +39,22 @@ Understanding what this package does and does not protect is the point of this s
 The AWS profile name originates in application configuration, which is user-controlled input. Every AWS CLI invocation is built as an argument array and handed to `proc_open` without a shell, so a value such as `foo; rm -rf /` is passed through as a single, inert argv entry.
 
 `exec`, `shell_exec`, `system`, `passthru`, backticks, and direct `proc_open` calls are forbidden in this package and enforced by an architecture test. A regression test asserts that shell metacharacters in a profile name remain a single process argument.
+
+### Guardrails fail closed
+
+The optional `expected_account_id` and `expected_role` guardrails are a security control, so every path that makes one unenforceable is an error rather than a silent pass:
+
+- **The role guardrail compares the role component of the ARN, never a substring of the whole ARN.** A substring test accepts any broader permission set whose name extends the expected one (`LaravelDeveloperAdmin` contains `LaravelDeveloper`) and is also satisfied by a match in the session name. The comparison is exact and case-sensitive against the Identity Center permission set name or the generated role name.
+- **An identity that is not an assumed role can never satisfy a role guardrail.** This also rejects a profile backed by long-lived keys in `~/.aws/credentials` rather than an Identity Center session.
+- **Static environment credentials with a guardrail configured is a hard failure**, and `fail_on_static_credentials => false` does not downgrade it. The AWS SDK resolves environment credentials before the profile, so verifying the profile would assert about an identity the application will not use — a check that reads as passing while describing the wrong thing.
+- **A guardrail value that cannot be compared to an identity is a configuration error.** Only `null` and `false` mean "off"; an array, an object, or `true` throws rather than silently disabling the check.
+
+When static credentials are tolerated and no guardrail is configured, the package still declines to report the profile's identity as the one the application authenticated with, because it is not.
+
+### Trust assumptions
+
+- The `aws` executable is resolved through `PATH`, with the environment and working directory the Artisan process already has. The package trusts the developer's shell to the same degree the developer already does; it does not sandbox or pin the binary.
+- Guardrails constrain what this package will let start. They do not constrain what the application does afterwards — the AWS SDK resolves credentials independently on every call.
 
 ### This package does not make your AWS permissions safe
 
