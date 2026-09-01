@@ -29,7 +29,7 @@ final readonly class AwsIdentity
     {
         $decoded = json_decode(trim($json), true);
 
-        if (! is_array($decoded) || array_is_list($decoded)) {
+        if (! is_array($decoded)) {
             throw AwsAuthenticationFailed::malformedIdentity();
         }
 

@@ -69,31 +69,39 @@ final class AwsSsoAuthenticator
             throw AwsCliNotFound::make();
         }
 
-        $reauthenticated = false;
-
         try {
             $identity = $this->cli->identity($profile);
+            $reauthenticated = false;
         } catch (AwsAuthenticationFailed) {
-            if (! $interactive) {
-                throw AwsAuthenticationFailed::nonInteractive($profile);
-            }
-
-            $output?->writeln("<comment>AWS SSO session for [{$profile}] has expired. Signing in...</comment>");
-
-            $this->cli->login($profile, $this->streamTo($output));
-
+            $identity = $this->reauthenticate($profile, $output, $interactive);
             $reauthenticated = true;
-
-            try {
-                $identity = $this->cli->identity($profile);
-            } catch (AwsAuthenticationFailed $e) {
-                throw AwsAuthenticationFailed::unverifiedAfterLogin($profile, $e, $e->cliOutput());
-            }
         }
 
         $this->verify($identity, $profile);
 
         return new AuthenticationResult($profile, $identity, $reauthenticated);
+    }
+
+    /**
+     * Sign the profile back in and confirm the new session is usable.
+     *
+     * @throws AwsAuthenticationFailed
+     */
+    private function reauthenticate(string $profile, ?OutputInterface $output, bool $interactive): AwsIdentity
+    {
+        if (! $interactive) {
+            throw AwsAuthenticationFailed::nonInteractive($profile);
+        }
+
+        $output?->writeln("<comment>AWS SSO session for [{$profile}] has expired. Signing in...</comment>");
+
+        $this->cli->login($profile, $this->streamTo($output));
+
+        try {
+            return $this->cli->identity($profile);
+        } catch (AwsAuthenticationFailed $e) {
+            throw AwsAuthenticationFailed::unverifiedAfterLogin($profile, $e, $e->cliOutput());
+        }
     }
 
     /**
@@ -150,11 +158,7 @@ final class AwsSsoAuthenticator
             throw StaticCredentialsDetected::make($profile);
         }
 
-        $output?->writeln(
-            '<comment>Static AWS credentials are configured. Remove '
-            .StaticCredentials::ACCESS_KEY_ID.' and '.StaticCredentials::SECRET_ACCESS_KEY
-            ." so the AWS SDK can use [{$profile}].</comment>"
-        );
+        $output?->writeln('<comment>'.$this->staticCredentials->shadowWarning($profile).'</comment>');
     }
 
     private function expected(string $key): ?string

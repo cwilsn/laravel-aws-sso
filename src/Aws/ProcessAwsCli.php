@@ -17,17 +17,17 @@ use Throwable;
  */
 final class ProcessAwsCli implements AwsCli
 {
-    public function __construct(
-        private readonly ProcessFactory $process,
-        private readonly int $versionTimeout = 10,
-        private readonly int $identityTimeout = 15,
-    ) {}
+    private const VERSION_TIMEOUT = 10;
+
+    private const IDENTITY_TIMEOUT = 15;
+
+    public function __construct(private readonly ProcessFactory $process) {}
 
     public function isInstalled(): bool
     {
         try {
             return $this->process
-                ->timeout($this->versionTimeout)
+                ->timeout(self::VERSION_TIMEOUT)
                 ->run(['aws', '--version'])
                 ->successful();
         } catch (Throwable) {
@@ -40,7 +40,7 @@ final class ProcessAwsCli implements AwsCli
     public function identity(string $profile): AwsIdentity
     {
         $result = $this->process
-            ->timeout($this->identityTimeout)
+            ->timeout(self::IDENTITY_TIMEOUT)
             ->run([
                 'aws',
                 'sts',

@@ -67,10 +67,7 @@ final class StatusCommand extends Command
 
         if ($staticCredentials->detected()) {
             $this->newLine();
-            $this->components->warn(
-                'Static AWS credentials are configured. Remove '.StaticCredentials::ACCESS_KEY_ID
-                .' and '.StaticCredentials::SECRET_ACCESS_KEY." so the AWS SDK can use [{$profile}]."
-            );
+            $this->components->warn($staticCredentials->shadowWarning($profile));
         }
 
         return self::SUCCESS;

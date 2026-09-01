@@ -6,7 +6,6 @@ namespace LaravelAwsSso;
 
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Events\Dispatcher;
-use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Support\ServiceProvider;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsCli;
@@ -26,9 +25,7 @@ final class LaravelAwsSsoServiceProvider extends ServiceProvider
 
         $this->app->singleton(StaticCredentials::class);
 
-        $this->app->singleton(AwsCli::class, static fn ($app): AwsCli => new ProcessAwsCli(
-            $app->make(ProcessFactory::class),
-        ));
+        $this->app->singleton(AwsCli::class, ProcessAwsCli::class);
 
         $this->app->singleton(AwsSsoAuthenticator::class);
     }

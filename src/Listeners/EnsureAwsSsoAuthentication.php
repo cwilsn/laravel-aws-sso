@@ -47,7 +47,7 @@ final class EnsureAwsSsoAuthentication
     private function shouldRun(CommandStarting $event): bool
     {
         return $this->app->runningInConsole()
-            && (bool) $this->config->get('aws-sso.enabled', true)
+            && $this->config->get('aws-sso.enabled', true)
             && in_array($event->command, $this->list('aws-sso.commands'), true)
             && in_array($this->app->environment(), $this->list('aws-sso.environments'), true);
     }
@@ -56,9 +56,11 @@ final class EnsureAwsSsoAuthentication
     {
         $message = "AWS authenticated with [{$result->profile}]";
 
-        return (bool) $this->config->get('aws-sso.show_identity_after_login', true)
-            ? $message.': '.$result->identity->arn
-            : $message.'.';
+        if (! $this->config->get('aws-sso.show_identity_after_login', true)) {
+            return $message.'.';
+        }
+
+        return $message.': '.$result->identity->arn;
     }
 
     /**

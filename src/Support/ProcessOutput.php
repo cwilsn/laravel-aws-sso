@@ -21,12 +21,10 @@ final class ProcessOutput
      */
     public static function excerpt(string $output): string
     {
-        $lines = preg_split('/\R/', trim($output)) ?: [];
-
-        $lines = array_values(array_filter(
-            array_map(static fn (string $line): string => rtrim($line), $lines),
+        $lines = array_filter(
+            array_map(rtrim(...), preg_split('/\R/', trim($output)) ?: []),
             static fn (string $line): bool => $line !== '',
-        ));
+        );
 
         if ($lines === []) {
             return '';

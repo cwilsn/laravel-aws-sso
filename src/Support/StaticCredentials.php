@@ -44,6 +44,17 @@ final class StaticCredentials
     }
 
     /**
+     * The warning shown when static credentials would shadow an SSO profile.
+     *
+     * Names the variables only; their values are never read out of this class.
+     */
+    public function shadowWarning(string $profile): string
+    {
+        return 'Static AWS credentials are configured. Remove '.self::ACCESS_KEY_ID
+            .' and '.self::SECRET_ACCESS_KEY." so the AWS SDK can use [{$profile}].";
+    }
+
+    /**
      * A session token on its own is temporary, so it is diagnostic rather than fatal.
      */
     public function hasSessionToken(): bool
