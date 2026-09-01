@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Corrected the binary-resolution trust assumption in `SECURITY.md`. It described the `aws` executable as resolved through `PATH`, which understates the behaviour on Windows: Symfony's Process component bypasses the shell, so `CreateProcess` resolves the name and searches the current directory — the Laravel project root — ahead of `PATH`. No code change; the behaviour is unchanged and documented as a known, unmitigated trust assumption.
+
 ## [0.1.0-alpha.1] - 2026-09-01
 
 First alpha. The API may change before 1.0.

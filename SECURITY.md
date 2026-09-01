@@ -53,7 +53,11 @@ When static credentials are tolerated and no guardrail is configured, the packag
 
 ### Trust assumptions
 
-- The `aws` executable is resolved through `PATH`, with the environment and working directory the Artisan process already has. The package trusts the developer's shell to the same degree the developer already does; it does not sandbox or pin the binary.
+- **The `aws` executable is invoked by bare name, never an absolute path**, with the environment and working directory the Artisan process already has. The package trusts the developer's machine to the same degree the developer already does; it does not sandbox or pin the binary.
+
+  How that name resolves is platform-dependent, and on Windows it is not simply `PATH`. Symfony's Process component runs with `bypass_shell` enabled, so the name is resolved by `CreateProcess`, whose search order places **the current directory ahead of `PATH`**. Artisan's current directory is the Laravel project root, so an `aws.exe` sitting in a project root would be preferred over the installed AWS CLI. (Only `.exe` — bypassing the shell means `aws.bat` and `aws.cmd` are not candidates.) On Linux and macOS the current directory is not searched unless `PATH` itself contains `.`.
+
+  This is known and not currently mitigated. In practice it is bounded by the fact that reaching it means running `composer install` and booting the project's service providers from an untrusted repository, both of which already execute arbitrary code well before the AWS CLI is invoked. A future version may give the subprocess a neutral working directory, which costs nothing — the AWS CLI reads its configuration from `~/.aws` and does not depend on where it runs.
 - Guardrails constrain what this package will let start. They do not constrain what the application does afterwards — the AWS SDK resolves credentials independently on every call.
 
 ### This package does not make your AWS permissions safe
