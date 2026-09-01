@@ -60,3 +60,43 @@ jobs:
 
       - name: Check formatting
         run: vendor/bin/pint --test
+
+  static-analysis:
+    name: PHPStan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Analyse
+        run: vendor/bin/phpstan analyse --no-progress
+
+  refactor:
+    name: Rector
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Check for pending refactorings
+        run: vendor/bin/rector process --dry-run --no-progress-bar

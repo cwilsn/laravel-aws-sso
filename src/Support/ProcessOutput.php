@@ -9,9 +9,9 @@ namespace LaravelAwsSso\Support;
  */
 final class ProcessOutput
 {
-    private const MAX_LINES = 5;
+    private const int MAX_LINES = 5;
 
-    private const MAX_CHARACTERS = 500;
+    private const int MAX_CHARACTERS = 500;
 
     /**
      * Reduce raw CLI output to a short, trimmed excerpt.

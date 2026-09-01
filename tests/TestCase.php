@@ -12,7 +12,7 @@ use Orchestra\Testbench\TestCase as Orchestra;
 abstract class TestCase extends Orchestra
 {
     /** @var list<string> */
-    private const CREDENTIAL_VARIABLES = [
+    private const array CREDENTIAL_VARIABLES = [
         StaticCredentials::ACCESS_KEY_ID,
         StaticCredentials::SECRET_ACCESS_KEY,
         StaticCredentials::SESSION_TOKEN,

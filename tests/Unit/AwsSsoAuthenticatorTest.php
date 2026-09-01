@@ -15,6 +15,19 @@ use LaravelAwsSso\Tests\Fixtures\FakeAwsCli;
 use Symfony\Component\Console\Output\BufferedOutput;
 
 /**
+ * The package's own config file, so tests exercise the shipped defaults.
+ *
+ * @return array<string, mixed>
+ */
+function packageConfig(): array
+{
+    /** @var array<string, mixed> $config */
+    $config = require __DIR__.'/../../config/aws-sso.php';
+
+    return $config;
+}
+
+/**
  * @param  array<string, mixed>  $config
  */
 function authenticator(FakeAwsCli $cli, array $config = []): AwsSsoAuthenticator
@@ -22,7 +35,7 @@ function authenticator(FakeAwsCli $cli, array $config = []): AwsSsoAuthenticator
     return new AwsSsoAuthenticator(
         $cli,
         new Repository(['aws-sso' => array_merge(
-            require __DIR__.'/../../config/aws-sso.php',
+            packageConfig(),
             ['profile' => 'my-dev-profile', 'expected_account_id' => null, 'expected_role' => null],
             $config,
         )]),
@@ -268,5 +281,66 @@ describe('identity guardrails', function (): void {
 
         expect(fn () => $authenticator->verify(new AwsIdentity('u', '1', 'arn'), 'my-dev-profile'))
             ->toThrow(UnexpectedAwsAccount::class);
+    });
+});
+
+describe('malformed guardrail configuration', function (): void {
+    it('ignores guardrail values that are not usable strings', function (mixed $value): void {
+        $result = authenticator(FakeAwsCli::authenticated(), [
+            'expected_account_id' => $value,
+            'expected_role' => $value,
+        ])->ensureAuthenticated();
+
+        expect($result->identity->account)->toBe('123456789012');
+    })->with([
+        'true' => [true],
+        'false' => [false],
+        'array' => [['123456789012']],
+        'object' => [new stdClass],
+    ]);
+
+    it('coerces a numeric account id from the config file', function (): void {
+        $result = authenticator(FakeAwsCli::authenticated(), ['expected_account_id' => 123456789012])
+            ->ensureAuthenticated();
+
+        expect($result->profile)->toBe('my-dev-profile');
+    });
+
+    it('trims whitespace around a configured guardrail', function (): void {
+        $result = authenticator(FakeAwsCli::authenticated(), [
+            'expected_account_id' => '  123456789012  ',
+            'expected_role' => "\tLaravelDeveloper\n",
+        ])->ensureAuthenticated();
+
+        expect($result->identity->account)->toBe('123456789012');
+    });
+});
+
+describe('static credential configuration', function (): void {
+    it('treats a missing fail_on_static_credentials key as fail closed', function (): void {
+        $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+        $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'secret');
+
+        $authenticator = new AwsSsoAuthenticator(
+            FakeAwsCli::authenticated(),
+            new Repository(['aws-sso' => ['profile' => 'my-dev-profile']]),
+            new StaticCredentials,
+        );
+
+        expect(fn () => $authenticator->ensureAuthenticated())
+            ->toThrow(StaticCredentialsDetected::class);
+    });
+
+    it('checks static credentials before it ever looks for the aws cli', function (): void {
+        $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+        $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'secret');
+
+        $cli = new FakeAwsCli;
+        $cli->installed = false;
+
+        // The static credential message is the actionable one, so it must not be
+        // masked by an unrelated "install the AWS CLI" failure.
+        expect(fn () => authenticator($cli)->ensureAuthenticated())
+            ->toThrow(StaticCredentialsDetected::class);
     });
 });

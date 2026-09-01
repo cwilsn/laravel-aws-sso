@@ -14,11 +14,11 @@ use Illuminate\Support\Env;
  */
 final class StaticCredentials
 {
-    public const ACCESS_KEY_ID = 'AWS_ACCESS_KEY_ID';
+    public const string ACCESS_KEY_ID = 'AWS_ACCESS_KEY_ID';
 
-    public const SECRET_ACCESS_KEY = 'AWS_SECRET_ACCESS_KEY';
+    public const string SECRET_ACCESS_KEY = 'AWS_SECRET_ACCESS_KEY';
 
-    public const SESSION_TOKEN = 'AWS_SESSION_TOKEN';
+    public const string SESSION_TOKEN = 'AWS_SESSION_TOKEN';
 
     /**
      * Both halves of a static key pair are present, so the SDK will use them.
@@ -39,7 +39,7 @@ final class StaticCredentials
     {
         return array_values(array_filter(
             [self::ACCESS_KEY_ID, self::SECRET_ACCESS_KEY, self::SESSION_TOKEN],
-            fn (string $name): bool => $this->has($name),
+            $this->has(...),
         ));
     }
 

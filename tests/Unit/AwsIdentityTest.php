@@ -43,3 +43,25 @@ it('does not leak the raw payload in the malformed identity message', function (
             expect($e->getMessage())->not->toContain('super-secret-value');
         });
 });
+
+it('trims surrounding whitespace from every identity field', function (): void {
+    $identity = AwsIdentity::fromJson(<<<'JSON'
+    {
+        "UserId": "  AROAEXAMPLEID:developer  ",
+        "Account": "\t123456789012\n",
+        "Arn": " arn:aws:sts::123456789012:assumed-role/Role/developer "
+    }
+    JSON);
+
+    expect($identity->userId)->toBe('AROAEXAMPLEID:developer')
+        ->and($identity->account)->toBe('123456789012')
+        ->and($identity->arn)->toBe('arn:aws:sts::123456789012:assumed-role/Role/developer');
+});
+
+it('ignores extra keys that sts may add', function (): void {
+    $identity = AwsIdentity::fromJson(
+        '{"UserId":"u","Account":"1","Arn":"a","ResponseMetadata":{"RequestId":"abc"}}'
+    );
+
+    expect($identity->account)->toBe('1');
+});

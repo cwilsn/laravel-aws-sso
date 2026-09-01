@@ -112,8 +112,8 @@ it('never lets a profile name reach a shell', function (string $malicious): void
     // The array form is handed straight to proc_open, so the whole value stays
     // a single argv entry rather than being parsed as shell syntax.
     Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command)
-        && $process->command[4] === $malicious
-        && count($process->command) === 8);
+        && count($process->command) === 8
+        && ($process->command[4] ?? null) === $malicious);
 
     // Symfony escapes the argument array into a single quoted argv entry, so
     // even the shell-looking payload is inert.
@@ -136,7 +136,61 @@ it('never lets a profile name reach a shell during login', function (): void {
     awsCli()->login('foo; touch /tmp/laravel-aws-sso-pwned');
 
     Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command)
-        && $process->command[4] === 'foo; touch /tmp/laravel-aws-sso-pwned');
+        && ($process->command[4] ?? null) === 'foo; touch /tmp/laravel-aws-sso-pwned');
 
     expect(file_exists('/tmp/laravel-aws-sso-pwned'))->toBeFalse();
+});
+
+it('reports the aws cli as missing when the process cannot be started at all', function (): void {
+    // Laravel throws for an unfaked process rather than returning a failed
+    // result, which is the same shape as a missing executable on some platforms.
+    Process::fake([LOGIN_COMMAND => Process::result('unrelated')]);
+
+    expect(awsCli()->isInstalled())->toBeFalse();
+});
+
+it('applies a bounded timeout to the version check', function (): void {
+    Process::fake([VERSION_COMMAND => Process::result('aws-cli/2.33.16')]);
+
+    awsCli()->isInstalled();
+
+    Process::assertRan(fn (PendingProcess $process): bool => $process->timeout === 10);
+});
+
+it('matches the tty mode to what the current terminal supports', function (): void {
+    Process::fake([LOGIN_COMMAND => Process::result('Attempting to open the SSO authorization page')]);
+
+    awsCli()->login('my-dev-profile', function (string $type, string $chunk): void {});
+
+    // With a TTY the AWS CLI writes straight to the terminal; without one the
+    // package has to stream the output through the callback instead.
+    Process::assertRan(fn (PendingProcess $process): bool => $process->tty === SymfonyProcess::isTtySupported());
+});
+
+it('asks for json without a pager on every identity check', function (): void {
+    Process::fake([IDENTITY_COMMAND => Process::result(IDENTITY_JSON)]);
+
+    awsCli()->identity('my-dev-profile');
+
+    Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command)
+        && in_array('--no-cli-pager', $process->command, true)
+        && in_array('json', $process->command, true));
+});
+
+it('always builds commands as an argument array, never a string', function (): void {
+    Process::fake([
+        VERSION_COMMAND => Process::result('aws-cli/2.33.16'),
+        IDENTITY_COMMAND => Process::result(IDENTITY_JSON),
+        LOGIN_COMMAND => Process::result('ok'),
+    ]);
+
+    $cli = awsCli();
+    $cli->isInstalled();
+    $cli->identity('my-dev-profile');
+    $cli->login('my-dev-profile');
+
+    // A string command would be handed to `/bin/sh -c`; an array goes straight
+    // to proc_open/execvp, so no argument is ever parsed as shell syntax.
+    Process::assertRanTimes(fn (PendingProcess $process): bool => is_array($process->command)
+        && $process->command[0] === 'aws', 3);
 });

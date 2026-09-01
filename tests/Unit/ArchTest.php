@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\LaravelAwsSsoException;
+use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
+use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
+use LaravelAwsSso\Exceptions\UnexpectedAwsRole;
+
 arch('the package never shells out')
     ->expect(['exec', 'shell_exec', 'system', 'passthru', 'popen', 'proc_open', 'pcntl_exec'])
     ->not->toBeUsed();
@@ -15,15 +22,15 @@ arch('the package avoids debugging helpers')
 
 arch('exceptions are final and marked as ours')
     ->expect([
-        LaravelAwsSso\Exceptions\AwsAuthenticationFailed::class,
-        LaravelAwsSso\Exceptions\AwsCliNotFound::class,
-        LaravelAwsSso\Exceptions\StaticCredentialsDetected::class,
-        LaravelAwsSso\Exceptions\UnexpectedAwsAccount::class,
-        LaravelAwsSso\Exceptions\UnexpectedAwsRole::class,
+        AwsAuthenticationFailed::class,
+        AwsCliNotFound::class,
+        StaticCredentialsDetected::class,
+        UnexpectedAwsAccount::class,
+        UnexpectedAwsRole::class,
     ])
     ->toBeFinal()
     ->toExtend(RuntimeException::class)
-    ->toImplement(LaravelAwsSso\Exceptions\LaravelAwsSsoException::class);
+    ->toImplement(LaravelAwsSsoException::class);
 
 arch('source is strictly typed')
     ->expect('LaravelAwsSso')

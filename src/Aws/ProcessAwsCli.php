@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LaravelAwsSso\Aws;
 
 use Illuminate\Process\Factory as ProcessFactory;
+use Illuminate\Process\PendingProcess;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use Symfony\Component\Process\Process as SymfonyProcess;
 use Throwable;
@@ -14,19 +15,22 @@ use Throwable;
  *
  * Every command is built as an argument array, so the profile name is passed
  * to `proc_open` as a single argv entry and is never parsed by a shell.
+ *
+ * Pending processes are created explicitly rather than through the factory's
+ * `__call()` forwarding, which is untyped and would erase every result type.
  */
-final class ProcessAwsCli implements AwsCli
+final readonly class ProcessAwsCli implements AwsCli
 {
-    private const VERSION_TIMEOUT = 10;
+    private const int VERSION_TIMEOUT = 10;
 
-    private const IDENTITY_TIMEOUT = 15;
+    private const int IDENTITY_TIMEOUT = 15;
 
-    public function __construct(private readonly ProcessFactory $process) {}
+    public function __construct(private ProcessFactory $process) {}
 
     public function isInstalled(): bool
     {
         try {
-            return $this->process
+            return $this->pending()
                 ->timeout(self::VERSION_TIMEOUT)
                 ->run(['aws', '--version'])
                 ->successful();
@@ -39,7 +43,7 @@ final class ProcessAwsCli implements AwsCli
 
     public function identity(string $profile): AwsIdentity
     {
-        $result = $this->process
+        $result = $this->pending()
             ->timeout(self::IDENTITY_TIMEOUT)
             ->run([
                 'aws',
@@ -66,7 +70,7 @@ final class ProcessAwsCli implements AwsCli
     {
         $tty = SymfonyProcess::isTtySupported();
 
-        $result = $this->process
+        $result = $this->pending()
             // The developer has to complete a browser flow; do not cut them off.
             ->forever()
             ->tty($tty)
@@ -81,5 +85,10 @@ final class ProcessAwsCli implements AwsCli
                 $result->errorOutput() ?: $result->output(),
             );
         }
+    }
+
+    private function pending(): PendingProcess
+    {
+        return $this->process->newPendingProcess();
     }
 }

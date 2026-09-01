@@ -93,3 +93,36 @@ it('reports a guardrail mismatch as a failure', function (): void {
         ->expectsOutputToContain('authenticated to account [123456789012]; expected [999999999999]')
         ->assertFailed();
 });
+
+it('lists a lone session token without treating it as shadowing credentials', function (): void {
+    statusCli(FakeAwsCli::authenticated());
+    $this->setEnvironmentVariable(StaticCredentials::SESSION_TOKEN, 'FwoGZXIvYXdzEXAMPLE');
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain(StaticCredentials::SESSION_TOKEN)
+        // A session token alone is temporary, so it is reported but not fatal.
+        ->doesntExpectOutputToContain('Remove '.StaticCredentials::ACCESS_KEY_ID)
+        ->doesntExpectOutputToContain('FwoGZXIvYXdzEXAMPLE')
+        ->assertSuccessful();
+});
+
+it('still reports the identity when static credentials are shadowing the profile', function (): void {
+    statusCli(FakeAwsCli::authenticated());
+    $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+    $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'secret');
+
+    // Status is diagnostic: it warns, but it never fails purely on a warning.
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('Identity: arn:aws:sts::123456789012:assumed-role/')
+        ->expectsOutputToContain('so the AWS SDK can use [my-dev-profile]')
+        ->assertSuccessful();
+});
+
+it('reports a role guardrail mismatch as a failure', function (): void {
+    statusCli(FakeAwsCli::authenticated());
+    config(['aws-sso.expected_role' => 'AdministratorAccess']);
+
+    $this->artisan('aws-sso:status')
+        ->expectsOutputToContain('Expected role to contain: AdministratorAccess')
+        ->assertFailed();
+});

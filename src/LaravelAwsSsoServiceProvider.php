@@ -17,7 +17,7 @@ use LaravelAwsSso\Support\StaticCredentials;
 
 final class LaravelAwsSsoServiceProvider extends ServiceProvider
 {
-    private const CONFIG = __DIR__.'/../config/aws-sso.php';
+    private const string CONFIG = __DIR__.'/../config/aws-sso.php';
 
     public function register(): void
     {

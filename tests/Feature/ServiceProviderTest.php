@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\ServiceProvider;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Aws\ProcessAwsCli;
+use LaravelAwsSso\LaravelAwsSsoServiceProvider;
 use LaravelAwsSso\Listeners\EnsureAwsSsoAuthentication;
 
 it('merges the package configuration without publishing', function (): void {
@@ -36,15 +39,15 @@ it('registers the command starting listener', function (): void {
 });
 
 it('registers the artisan commands', function (): void {
-    $commands = array_keys(app(Illuminate\Contracts\Console\Kernel::class)->all());
+    $commands = array_keys(app(Kernel::class)->all());
 
     expect($commands)->toContain('aws-sso:login')
         ->and($commands)->toContain('aws-sso:status');
 });
 
 it('publishes the configuration under a stable tag', function (): void {
-    $paths = Illuminate\Support\ServiceProvider::pathsToPublish(
-        LaravelAwsSso\LaravelAwsSsoServiceProvider::class,
+    $paths = ServiceProvider::pathsToPublish(
+        LaravelAwsSsoServiceProvider::class,
         'aws-sso-config',
     );
 

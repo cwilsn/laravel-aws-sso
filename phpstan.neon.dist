@@ -1,0 +1,29 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/pestphp/pest/phpstan-pest-extension.neon
+
+parameters:
+    level: max
+
+    # Only the shipped code is analysed. Pest's DSL (`arch()`, and `$this`
+    # bound into test closures) is not statically resolvable, so including
+    # tests would mean a baseline of false positives that hides real findings.
+    paths:
+        - config
+        - src
+
+    tmpDir: .phpstan.cache
+
+    # The package ships its own config file; env() is legitimate there.
+    configDirectories:
+        - config
+
+    treatPhpDocTypesAsCertain: false
+
+    checkMissingCallableSignature: true
+    checkUninitializedProperties: true
+    checkBenevolentUnionTypes: true
+    reportPossiblyNonexistentGeneralArrayOffset: true
+    reportPossiblyNonexistentConstantArrayOffset: true
+    reportAlwaysTrueInLastCondition: true
+    reportAnyTypeWideningInVarTag: true

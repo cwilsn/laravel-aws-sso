@@ -22,12 +22,12 @@ use Symfony\Component\Console\Output\OutputInterface;
  * {@see AwsCli} and never touches credential files, token caches, or the
  * developer's AWS configuration.
  */
-final class AwsSsoAuthenticator
+final readonly class AwsSsoAuthenticator
 {
     public function __construct(
-        private readonly AwsCli $cli,
-        private readonly Config $config,
-        private readonly StaticCredentials $staticCredentials,
+        private AwsCli $cli,
+        private Config $config,
+        private StaticCredentials $staticCredentials,
     ) {}
 
     /**

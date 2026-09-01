@@ -33,3 +33,22 @@ it('truncates very long single lines', function (): void {
     expect(mb_strlen($excerpt))->toBeLessThan(600)
         ->and($excerpt)->toEndWith('...');
 });
+
+it('appends a single ellipsis when output is both too long and too many lines', function (): void {
+    $excerpt = ProcessOutput::excerpt(implode("\n", array_map(
+        static fn (int $i): string => str_repeat('x', 200)." {$i}",
+        range(1, 20),
+    )));
+
+    expect(mb_strlen($excerpt))->toBeLessThan(600)
+        ->and($excerpt)->toEndWith('...')
+        ->and(mb_substr_count($excerpt, '...'))->toBe(1);
+});
+
+it('normalises carriage returns from windows aws cli output', function (): void {
+    expect(ProcessOutput::excerpt("first\r\nsecond\r\n"))->toBe("first\nsecond");
+});
+
+it('trims trailing whitespace from each retained line', function (): void {
+    expect(ProcessOutput::excerpt("first   \nsecond\t"))->toBe("first\nsecond");
+});

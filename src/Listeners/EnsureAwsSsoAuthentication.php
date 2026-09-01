@@ -19,12 +19,12 @@ use Symfony\Component\Console\Input\InputInterface;
  * lifecycle instead and leaves the native `dev` command untouched. Any
  * exception thrown here propagates and stops the command from starting.
  */
-final class EnsureAwsSsoAuthentication
+final readonly class EnsureAwsSsoAuthentication
 {
     public function __construct(
-        private readonly AwsSsoAuthenticator $authenticator,
-        private readonly Config $config,
-        private readonly Application $app,
+        private AwsSsoAuthenticator $authenticator,
+        private Config $config,
+        private Application $app,
     ) {}
 
     public function handle(CommandStarting $event): void
@@ -86,6 +86,6 @@ final class EnsureAwsSsoAuthentication
             return [];
         }
 
-        return array_values(array_filter($values, 'is_string'));
+        return array_values(array_filter($values, is_string(...)));
     }
 }
