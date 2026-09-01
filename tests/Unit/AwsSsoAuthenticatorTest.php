@@ -7,6 +7,7 @@ use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsIdentity;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\InvalidGuardrailConfiguration;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
 use LaravelAwsSso\Exceptions\UnexpectedAwsRole;
@@ -211,6 +212,36 @@ describe('static credentials', function (): void {
             ->and($output->fetch())->toContain('Static AWS credentials are configured.')
             ->and($cli->identityCalls)->toBe(['my-dev-profile']);
     });
+
+    it('marks a result whose profile is shadowed by static credentials', function (): void {
+        // The identity belongs to the profile; the application will not use it.
+        $result = authenticator(FakeAwsCli::authenticated(), ['fail_on_static_credentials' => false])
+            ->ensureAuthenticated();
+
+        expect($result->shadowedByStaticCredentials)->toBeTrue();
+    });
+
+    it('fails closed when static credentials would make a guardrail unenforceable', function (array $guardrail): void {
+        // `fail_on_static_credentials` is off, but a guardrail checked against a
+        // profile the AWS SDK will not use is worse than no guardrail at all.
+        $cli = FakeAwsCli::authenticated();
+
+        expect(fn () => authenticator($cli, ['fail_on_static_credentials' => false] + $guardrail)->ensureAuthenticated())
+            ->toThrow(StaticCredentialsDetected::class, 'guardrails cannot be enforced');
+
+        expect($cli->identityCalls)->toBe([]);
+    })->with([
+        'account' => [['expected_account_id' => '123456789012']],
+        'role' => [['expected_role' => 'LaravelDeveloper']],
+    ]);
+});
+
+describe('unshadowed results', function (): void {
+    it('are not marked as shadowed', function (): void {
+        $result = authenticator(FakeAwsCli::authenticated())->ensureAuthenticated();
+
+        expect($result->shadowedByStaticCredentials)->toBeFalse();
+    });
 });
 
 describe('identity guardrails', function (): void {
@@ -233,24 +264,78 @@ describe('identity guardrails', function (): void {
         expect($result->identity->account)->toBe('123456789012');
     });
 
-    it('accepts a role name contained in the assumed-role arn', function (): void {
+    it('accepts the identity center permission set name', function (): void {
         $result = authenticator(FakeAwsCli::authenticated(), ['expected_role' => 'LaravelDeveloper'])
             ->ensureAuthenticated();
 
         expect($result->identity->arn)->toContain('LaravelDeveloper');
     });
 
+    it('accepts the generated role name in full', function (): void {
+        $result = authenticator(
+            FakeAwsCli::authenticated(),
+            ['expected_role' => 'AWSReservedSSO_LaravelDeveloper_0a1b2c3d4e5f'],
+        )->ensureAuthenticated();
+
+        expect($result->identity->account)->toBe('123456789012');
+    });
+
+    it('accepts a permission set name containing underscores', function (): void {
+        $cli = FakeAwsCli::authenticated(FakeAwsCli::sampleIdentity(role: 'AWSReservedSSO_Laravel_Developer_v2_0a1b2c3d4e5f'));
+
+        $result = authenticator($cli, ['expected_role' => 'Laravel_Developer_v2'])->ensureAuthenticated();
+
+        expect($result->identity->arn)->toContain('Laravel_Developer_v2');
+    });
+
     it('rejects an unexpected role', function (): void {
         $cli = FakeAwsCli::authenticated(FakeAwsCli::sampleIdentity(role: 'AWSReservedSSO_AdministratorAccess_9f8e7d'));
 
         expect(fn () => authenticator($cli, ['expected_role' => 'LaravelDeveloper'])->ensureAuthenticated())
-            ->toThrow(UnexpectedAwsRole::class, 'Expected role to contain: LaravelDeveloper');
+            ->toThrow(UnexpectedAwsRole::class, 'Expected permission set or role: LaravelDeveloper');
     });
 
     it('matches the role case sensitively', function (): void {
         expect(fn () => authenticator(FakeAwsCli::authenticated(), ['expected_role' => 'laraveldeveloper'])->ensureAuthenticated())
             ->toThrow(UnexpectedAwsRole::class);
     });
+
+    it('rejects a broader permission set whose name merely extends the expected one', function (string $role): void {
+        // A substring test over the ARN would let every one of these through.
+        $cli = FakeAwsCli::authenticated(FakeAwsCli::sampleIdentity(role: $role));
+
+        expect(fn () => authenticator($cli, ['expected_role' => 'LaravelDeveloper'])->ensureAuthenticated())
+            ->toThrow(UnexpectedAwsRole::class);
+    })->with([
+        'suffixed permission set' => ['AWSReservedSSO_LaravelDeveloperAdmin_9f8e7d'],
+        'prefixed permission set' => ['AWSReservedSSO_SuperLaravelDeveloper_9f8e7d'],
+        'plain iam role of the same shape' => ['LaravelDeveloperAdmin'],
+    ]);
+
+    it('rejects a role that only matches outside the role name', function (): void {
+        // The session name is the Identity Center user name, which the role
+        // guardrail must never be satisfied by.
+        $cli = FakeAwsCli::authenticated(new AwsIdentity(
+            'AROAEXAMPLEID:developer',
+            '123456789012',
+            'arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_9f8e7d/LaravelDeveloper',
+        ));
+
+        expect(fn () => authenticator($cli, ['expected_role' => 'LaravelDeveloper'])->ensureAuthenticated())
+            ->toThrow(UnexpectedAwsRole::class, 'Actual permission set or role: AdministratorAccess');
+    });
+
+    it('rejects an identity that is not an assumed role at all', function (string $arn): void {
+        // Long-lived IAM user keys in ~/.aws/credentials authenticate happily;
+        // they just can never be the expected permission set.
+        $cli = FakeAwsCli::authenticated(new AwsIdentity('AIDAEXAMPLEID', '123456789012', $arn));
+
+        expect(fn () => authenticator($cli, ['expected_role' => 'LaravelDeveloper'])->ensureAuthenticated())
+            ->toThrow(UnexpectedAwsRole::class, 'not an assumed role');
+    })->with([
+        'iam user' => ['arn:aws:iam::123456789012:user/LaravelDeveloper'],
+        'account root' => ['arn:aws:iam::123456789012:root'],
+    ]);
 
     it('skips guardrails that are not configured', function (mixed $blank): void {
         $result = authenticator(FakeAwsCli::authenticated(), [
@@ -285,19 +370,26 @@ describe('identity guardrails', function (): void {
 });
 
 describe('malformed guardrail configuration', function (): void {
-    it('ignores guardrail values that are not usable strings', function (mixed $value): void {
-        $result = authenticator(FakeAwsCli::authenticated(), [
+    it('refuses to run with a guardrail value it cannot compare', function (mixed $value): void {
+        // Silently ignoring these would disable a security control on a typo.
+        expect(fn () => authenticator(FakeAwsCli::authenticated(), [
             'expected_account_id' => $value,
-            'expected_role' => $value,
-        ])->ensureAuthenticated();
-
-        expect($result->identity->account)->toBe('123456789012');
+        ])->ensureAuthenticated())
+            ->toThrow(InvalidGuardrailConfiguration::class, 'aws-sso.expected_account_id');
     })->with([
         'true' => [true],
-        'false' => [false],
         'array' => [['123456789012']],
         'object' => [new stdClass],
     ]);
+
+    it('treats false as a guardrail that is switched off', function (): void {
+        $result = authenticator(FakeAwsCli::authenticated(), [
+            'expected_account_id' => false,
+            'expected_role' => false,
+        ])->ensureAuthenticated();
+
+        expect($result->identity->account)->toBe('123456789012');
+    });
 
     it('coerces a numeric account id from the config file', function (): void {
         $result = authenticator(FakeAwsCli::authenticated(), ['expected_account_id' => 123456789012])

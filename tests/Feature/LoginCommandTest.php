@@ -100,7 +100,33 @@ it('fails with a readable error when the identity breaks a role guardrail', func
     config(['aws-sso.expected_role' => 'AdministratorAccess']);
 
     $this->artisan('aws-sso:login')
-        ->expectsOutputToContain('Expected role to contain: AdministratorAccess')
+        ->expectsOutputToContain('Expected permission set or role: AdministratorAccess')
+        ->assertFailed();
+});
+
+it('does not present a shadowed profile identity as the one the app will use', function (): void {
+    $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+    $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'super-secret-value');
+    config(['aws-sso.fail_on_static_credentials' => false]);
+    loginCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:login')
+        ->doesntExpectOutputToContain('AWS authenticated with')
+        ->expectsOutputToContain('not the one your application will use')
+        ->assertSuccessful();
+});
+
+it('refuses to report success when a guardrail cannot be enforced', function (): void {
+    $this->setEnvironmentVariable(StaticCredentials::ACCESS_KEY_ID, 'AKIAEXAMPLE');
+    $this->setEnvironmentVariable(StaticCredentials::SECRET_ACCESS_KEY, 'super-secret-value');
+    config([
+        'aws-sso.fail_on_static_credentials' => false,
+        'aws-sso.expected_account_id' => '123456789012',
+    ]);
+    loginCli(FakeAwsCli::authenticated());
+
+    $this->artisan('aws-sso:login')
+        ->expectsOutputToContain('guardrails cannot be enforced')
         ->assertFailed();
 });
 
