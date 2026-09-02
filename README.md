@@ -1,8 +1,27 @@
 # Laravel AWS SSO
 
-**AWS IAM Identity Center authentication for local Laravel development.**
+**Start Laravel with a usable AWS IAM Identity Center session—and keep it usable without restarting your development stack.**
 
-Laravel AWS SSO checks that your configured AWS profile can authenticate before `php artisan dev` starts. If the profile needs a fresh Identity Center session, it runs `aws sso login` and opens the browser. While Laravel is running, a companion process continues checking the session and lets you sign in again without restarting the rest of your development processes.
+Laravel AWS SSO makes authentication part of your normal `php artisan dev` workflow. You do not need to remember to run `aws sso login` first or restart every development process when your session expires.
+
+## What using it looks like
+
+Run Laravel as usual:
+
+```bash
+php artisan dev
+```
+
+The package handles the rest:
+
+1. **Before Laravel starts**, it checks whether the configured AWS profile can authenticate.
+2. **If the session is missing or expired**, it runs `aws sso login` and opens the Identity Center sign-in page in your browser. Laravel continues starting after you sign in.
+3. **While you work**, the `aws-sso` tab checks the session every 60 seconds without interrupting you or opening a browser.
+4. **If the session expires later**, select the `aws-sso` tab and press `r`. The watcher restarts, opens the sign-in page, and resumes monitoring after you authenticate. Your queues, logs, Vite server, and other development processes keep running.
+
+![Laravel dev console with the AWS SSO session watcher running alongside queues, logs, and Vite](docs/images/aws-sso-dev-console.png)
+
+*Select the `aws-sso` tab and press `r` whenever an expired session needs to be refreshed.*
 
 > Use a dedicated, least-privileged permission set for local development. Your application receives every permission granted to the selected profile.
 
@@ -125,11 +144,11 @@ php artisan aws-sso:status
 php artisan aws-sso:status --profile=another-profile
 ```
 
-## Session monitoring
+## Session monitoring details
 
-The `aws-sso` process checks the profile every 60 seconds by default. Background checks never open a browser.
+The `aws-sso` process checks the profile every 60 seconds by default. Background checks never open a browser; an interactive login only happens before `php artisan dev` starts or when you restart the selected `aws-sso` tab with `r`.
 
-If the session expires, select the `aws-sso` tab in Laravel's development UI and press `r`. If your terminal does not provide tab controls, sign in from another terminal:
+If your terminal does not provide tab controls, sign in from another terminal:
 
 ```bash
 php artisan aws-sso:login

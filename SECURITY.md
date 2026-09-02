@@ -1,67 +1,31 @@
 # Security Policy
 
-## Reporting a vulnerability
+## Report a vulnerability
 
-Please do **not** open a public issue for a security vulnerability.
+Do **not** open a public issue. Use [GitHub's private vulnerability reporting](https://github.com/cwilsn/laravel-aws-sso/security/advisories/new), or email the maintainer listed in `composer.json`.
 
-Report it privately through [GitHub's private vulnerability reporting](https://github.com/cwilsn/laravel-aws-sso/security/advisories/new), or by email to the maintainer listed in `composer.json`. You should receive an acknowledgement within a few business days.
+Include the affected version, a clear description, and steps to reproduce. You should receive an acknowledgement within a few business days.
 
-Please include a description of the issue, the affected version, and steps to reproduce.
+## Security boundary
 
-## Supported versions
+Laravel AWS SSO is a local-development CLI helper. It verifies a named AWS profile with `aws sts get-caller-identity`, starts `aws sso login` when an interactive session needs renewal, optionally enforces an expected account and role, and detects environment credentials that would override the profile.
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅        |
+It does not authenticate HTTP requests, manage IAM permissions, or replace the AWS CLI or SDK credential chain.
 
-This package is in alpha. Until 1.0 the API may change between minor versions, and only the latest 0.1.x release receives fixes.
+## Security guarantees
 
-## Security model
+- The PHP package never directly reads or writes `~/.aws`, including AWS configuration, credentials, and SSO cache files. The AWS CLI it invokes remains responsible for those files.
+- It checks whether `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` are present, but never retains or prints their values.
+- AWS commands are passed through Laravel's Process API as argument arrays without a shell. The profile remains one argument, and architecture tests forbid direct shell-execution functions.
+- Account matching is exact. Role matching is exact and case-sensitive against the permission-set name or generated role name; a non-assumed-role identity cannot satisfy it.
+- Configured guardrails fail closed when static environment credentials shadow the profile or when a value cannot be compared safely. `null`, `false`, and blank strings disable a guardrail.
+- Automatic checks run only for configured console commands and environments. With the defaults, that means `php artisan dev` locally. Periodic background checks never open a browser.
 
-Understanding what this package does and does not protect is the point of this section.
+If static credentials are explicitly allowed and no guardrail is configured, the package warns instead of claiming the application is using the verified profile.
 
-### What the package handles
+## Known limitations and safe use
 
-- It verifies that a named AWS profile has a usable IAM Identity Center session by calling `aws sts get-caller-identity`.
-- It starts `aws sso login` when that session can no longer be refreshed, both before `php artisan dev` starts and from its background companion process while `dev` remains running.
-- It optionally asserts that the resulting identity belongs to an expected AWS account and permission set.
-- It detects static environment credentials that would silently take precedence over the SSO profile.
-
-### What the package deliberately does not do
-
-- **It never stores credentials.** No access keys, secret keys, session tokens, or SSO tokens are read, written, cached, or logged by this package. The AWS CLI and the AWS SDK credential chain remain solely responsible for credentials.
-- **It never reads or writes `~/.aws`.** Not `credentials`, not `config`, not the SSO token cache under `~/.aws/sso/cache`. Those are AWS implementation details and are treated as off-limits.
-- **It never prints credential values.** Error messages name environment variables; they never contain their contents.
-- **It never runs during HTTP requests**, and never in production unless the configuration is explicitly changed.
-
-### Command injection
-
-The AWS profile name originates in application configuration, which is user-controlled input. Every AWS CLI invocation is built as an argument array and handed to `proc_open` without a shell, so a value such as `foo; rm -rf /` is passed through as a single, inert argv entry.
-
-`exec`, `shell_exec`, `system`, `passthru`, backticks, and direct `proc_open` calls are forbidden in this package and enforced by an architecture test. A regression test asserts that shell metacharacters in a profile name remain a single process argument.
-
-### Guardrails fail closed
-
-The optional `expected_account_id` and `expected_role` guardrails are a security control, so every path that makes one unenforceable is an error rather than a silent pass:
-
-- **The role guardrail compares the role component of the ARN, never a substring of the whole ARN.** A substring test accepts any broader permission set whose name extends the expected one (`LaravelDeveloperAdmin` contains `LaravelDeveloper`) and is also satisfied by a match in the session name. The comparison is exact and case-sensitive against the Identity Center permission set name or the generated role name.
-- **An identity that is not an assumed role can never satisfy a role guardrail.** This also rejects a profile backed by long-lived keys in `~/.aws/credentials` rather than an Identity Center session.
-- **Static environment credentials with a guardrail configured is a hard failure**, and `fail_on_static_credentials => false` does not downgrade it. The AWS SDK resolves environment credentials before the profile, so verifying the profile would assert about an identity the application will not use — a check that reads as passing while describing the wrong thing.
-- **A guardrail value that cannot be compared to an identity is a configuration error.** Only `null` and `false` mean "off"; an array, an object, or `true` throws rather than silently disabling the check.
-
-When static credentials are tolerated and no guardrail is configured, the package still declines to report the profile's identity as the one the application authenticated with, because it is not.
-
-### Trust assumptions
-
-- **The `aws` executable is invoked by bare name, never an absolute path**, with the environment and working directory the Artisan process already has. The package trusts the developer's machine to the same degree the developer already does; it does not sandbox or pin the binary.
-
-  How that name resolves is platform-dependent, and on Windows it is not simply `PATH`. Symfony's Process component runs with `bypass_shell` enabled, so the name is resolved by `CreateProcess`, whose search order places **the current directory ahead of `PATH`**. Artisan's current directory is the Laravel project root, so an `aws.exe` sitting in a project root would be preferred over the installed AWS CLI. (Only `.exe` — bypassing the shell means `aws.bat` and `aws.cmd` are not candidates.) On Linux and macOS the current directory is not searched unless `PATH` itself contains `.`.
-
-  This is known and not currently mitigated. In practice it is bounded by the fact that reaching it means running `composer install` and booting the project's service providers from an untrusted repository, both of which already execute arbitrary code well before the AWS CLI is invoked. A future version may give the subprocess a neutral working directory, which costs nothing — the AWS CLI reads its configuration from `~/.aws` and does not depend on where it runs.
-- Guardrails constrain what this package will let start and what identities its periodic monitor accepts. They do not constrain what the application does between checks — the AWS SDK resolves credentials independently on every call.
-
-### This package does not make your AWS permissions safe
-
-Authenticating an `AdministratorAccess` profile gives your local application administrator access for the duration of the session. IAM Identity Center replaces long-lived keys with short-lived ones; it does not reduce what those credentials can do.
-
-Create a least-privileged permission set for local application use, point `AWS_PROFILE` at it, and consider setting `AWS_SSO_EXPECTED_ROLE` so an unexpected permission set becomes a hard error.
+- The package invokes `aws` by name and trusts the operating system's executable resolution. On Windows, an `aws.exe` in the project directory may be selected before the installed CLI. This is an accepted risk because installing and booting an untrusted Laravel project already permits arbitrary code execution.
+- The package verifies its configured CLI profile at check time. An application can still use explicit credentials, another profile, or a custom provider, and the AWS SDK resolves credentials independently between checks.
+- SSO provides short-lived credentials; it does not make broad permissions safe. Use a dedicated, least-privileged permission set and consider configuring both account and role guardrails.
+- The package is intended for local development. Enabling it in other environments is an explicit configuration choice.
