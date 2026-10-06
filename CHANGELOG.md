@@ -4,6 +4,13 @@ Notable changes to `laravel-aws-sso`, following [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-06
+
+### Fixed
+
+- Keep the session watcher running when an AWS identity check times out, report the timeout once, and retry at the next monitoring interval.
+- Report identity timeouts as a distinct package exception, preserving the original cause without treating the timeout as an expired session or opening a browser login.
+
 ## [1.0.1] - 2026-09-01
 
 ### Documentation
@@ -44,7 +51,8 @@ First alpha. The API may change before 1.0.
 - `aws-sso:login` and `aws-sso:status` commands.
 - Publishable configuration with working defaults.
 
-[unreleased]: https://github.com/cwilsn/laravel-aws-sso/compare/v1.0.1...HEAD
+[unreleased]: https://github.com/cwilsn/laravel-aws-sso/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/cwilsn/laravel-aws-sso/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/cwilsn/laravel-aws-sso/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cwilsn/laravel-aws-sso/compare/v0.1.0-alpha.2...v1.0.0
 [0.1.0-alpha.2]: https://github.com/cwilsn/laravel-aws-sso/compare/v0.1.0-alpha.1...v0.1.0-alpha.2

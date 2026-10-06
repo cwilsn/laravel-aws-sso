@@ -66,6 +66,16 @@ it('fails with a readable error rather than an exception', function (): void {
         ->assertFailed();
 });
 
+it('reports an identity timeout without opening a browser', function (): void {
+    $cli = loginCli((new FakeAwsCli)->queueIdentityTimeout());
+
+    $this->artisan('aws-sso:login')
+        ->expectsOutputToContain('Authentication status could not be determined.')
+        ->assertFailed();
+
+    expect($cli->loginCalls)->toBe([]);
+});
+
 it('fails when the aws cli is missing', function (): void {
     $cli = loginCli(FakeAwsCli::authenticated());
     $cli->installed = false;

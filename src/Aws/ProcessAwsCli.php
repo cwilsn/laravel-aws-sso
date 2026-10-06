@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace LaravelAwsSso\Aws;
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Process\PendingProcess;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 use Symfony\Component\Process\Process as SymfonyProcess;
 use Throwable;
 
@@ -43,18 +45,22 @@ final readonly class ProcessAwsCli implements AwsCli
 
     public function identity(string $profile): AwsIdentity
     {
-        $result = $this->pending()
-            ->timeout(self::IDENTITY_TIMEOUT)
-            ->run([
-                'aws',
-                'sts',
-                'get-caller-identity',
-                '--profile',
-                $profile,
-                '--output',
-                'json',
-                '--no-cli-pager',
-            ]);
+        try {
+            $result = $this->pending()
+                ->timeout(self::IDENTITY_TIMEOUT)
+                ->run([
+                    'aws',
+                    'sts',
+                    'get-caller-identity',
+                    '--profile',
+                    $profile,
+                    '--output',
+                    'json',
+                    '--no-cli-pager',
+                ]);
+        } catch (ProcessTimedOutException $e) {
+            throw AwsIdentityTimedOut::make($profile, self::IDENTITY_TIMEOUT, $e);
+        }
 
         if (! $result->successful()) {
             throw AwsAuthenticationFailed::identityUnavailable(

@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use LaravelAwsSso\Aws\ProcessAwsCli;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
+use Symfony\Component\Process\Exception\ProcessTimedOutException as SymfonyTimeoutException;
 use Symfony\Component\Process\Process as SymfonyProcess;
 
 // Laravel matches process fakes against Symfony's escaped command line, which
@@ -66,6 +69,28 @@ it('fails when the identity check exits non-zero', function (): void {
 
     expect(fn () => awsCli()->identity('my-dev-profile'))
         ->toThrow(AwsAuthenticationFailed::class, 'does not have a usable IAM Identity Center session');
+});
+
+it('wraps an identity timeout as a distinct package exception and preserves its cause', function (): void {
+    $original = new SymfonyTimeoutException(
+        new SymfonyProcess(['aws', 'sts', 'get-caller-identity'], timeout: 15),
+        SymfonyTimeoutException::TYPE_GENERAL,
+    );
+
+    Process::fake([
+        IDENTITY_COMMAND => function () use ($original): never {
+            throw $original;
+        },
+    ]);
+
+    expect(fn () => awsCli()->identity('my-dev-profile'))
+        ->toThrow(function (AwsIdentityTimedOut $e) use ($original): void {
+            expect($e->getMessage())
+                ->toContain('profile [my-dev-profile] timed out after 15 seconds')
+                ->toContain('Authentication status could not be determined.')
+                ->and($e->getPrevious())->toBeInstanceOf(ProcessTimedOutException::class)
+                ->and($e->getPrevious()->getPrevious())->toBe($original);
+        });
 });
 
 it('includes an excerpt of the aws error when the identity check fails', function (): void {

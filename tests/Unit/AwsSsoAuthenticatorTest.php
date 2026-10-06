@@ -7,6 +7,7 @@ use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Aws\AwsIdentity;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 use LaravelAwsSso\Exceptions\InvalidGuardrailConfiguration;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
@@ -146,6 +147,28 @@ describe('expired session', function (): void {
                     ->and($e->getMessage())->not->toContain('does not have a usable IAM Identity Center session')
                     ->and($e->getPrevious())->toBeInstanceOf(AwsAuthenticationFailed::class);
             });
+    });
+});
+
+describe('identity timeouts', function (): void {
+    it('does not start a login when identity verification times out', function (): void {
+        $cli = (new FakeAwsCli)->queueIdentityTimeout();
+        $output = new BufferedOutput;
+
+        expect(fn () => authenticator($cli)->ensureAuthenticated(output: $output))
+            ->toThrow(AwsIdentityTimedOut::class);
+
+        expect($cli->loginCalls)->toBe([])
+            ->and($output->fetch())->toBe('');
+    });
+
+    it('does not repeat a login when the post-login identity check times out', function (): void {
+        $cli = (new FakeAwsCli)->queueExpiredSession()->queueIdentityTimeout();
+
+        expect(fn () => authenticator($cli)->ensureAuthenticated())
+            ->toThrow(AwsIdentityTimedOut::class);
+
+        expect($cli->loginCalls)->toBe(['my-dev-profile']);
     });
 });
 

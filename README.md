@@ -156,6 +156,8 @@ php artisan aws-sso:login
 
 The watcher resumes once the profile becomes usable. It does not stop Laravel's other development processes.
 
+Identity checks have a 15-second timeout. If a check times out, the watcher reports that authentication status could not be determined and retries at the next interval. A timeout does not trigger a browser login.
+
 ## Security notes
 
 - The package never writes credentials or modifies `~/.aws/config`, `~/.aws/credentials`, or the SSO cache.

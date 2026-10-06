@@ -9,6 +9,7 @@ use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Aws\AwsIdentity;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
 use LaravelAwsSso\Exceptions\AwsCliNotFound;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 use LaravelAwsSso\Exceptions\InvalidGuardrailConfiguration;
 use LaravelAwsSso\Exceptions\StaticCredentialsDetected;
 use LaravelAwsSso\Exceptions\UnexpectedAwsAccount;
@@ -54,6 +55,7 @@ final readonly class AwsSsoAuthenticator
      * @throws AwsCliNotFound
      * @throws StaticCredentialsDetected
      * @throws AwsAuthenticationFailed
+     * @throws AwsIdentityTimedOut
      * @throws UnexpectedAwsAccount
      * @throws UnexpectedAwsRole
      * @throws InvalidGuardrailConfiguration
@@ -89,6 +91,7 @@ final readonly class AwsSsoAuthenticator
      * Sign the profile back in and confirm the new session is usable.
      *
      * @throws AwsAuthenticationFailed
+     * @throws AwsIdentityTimedOut
      */
     private function reauthenticate(string $profile, ?OutputInterface $output, bool $interactive): AwsIdentity
     {

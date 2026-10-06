@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LaravelAwsSso\Aws;
 
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 
 /**
  * The only seam through which this package talks to the AWS CLI.
@@ -20,6 +21,7 @@ interface AwsCli
      * Resolve the identity the profile currently authenticates as.
      *
      * @throws AwsAuthenticationFailed when the profile has no usable session
+     * @throws AwsIdentityTimedOut when the identity check exceeds its time limit
      */
     public function identity(string $profile): AwsIdentity;
 

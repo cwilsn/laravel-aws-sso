@@ -10,6 +10,7 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Support\Sleep;
 use LaravelAwsSso\Auth\AwsSsoAuthenticator;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 use LaravelAwsSso\Exceptions\LaravelAwsSsoException;
 use LaravelAwsSso\Support\AuthenticationMessage;
 use LaravelAwsSso\Support\AutomaticAuthentication;
@@ -43,7 +44,9 @@ final class WatchCommand extends Command
 
         $once = (bool) $this->option('once');
         $profile = $authenticator->profile();
+        $seconds = $this->interval($config);
         $waiting = false;
+        $timedOut = false;
         $result = null;
 
         try {
@@ -56,6 +59,15 @@ final class WatchCommand extends Command
                 // configuration warning; do not repeat it in the companion tab.
                 warnAboutStaticCredentials: false,
             );
+        } catch (AwsIdentityTimedOut $e) {
+            $this->reportFailure($e);
+
+            if ($once) {
+                return self::FAILURE;
+            }
+
+            $this->reportRetry($seconds);
+            $timedOut = true;
         } catch (LaravelAwsSsoException $e) {
             $this->reportFailure($e);
 
@@ -75,7 +87,6 @@ final class WatchCommand extends Command
             return self::SUCCESS;
         }
 
-        $seconds = $this->interval($config);
         $this->line("<info>Watching AWS SSO session [{$profile}] every {$seconds} seconds.</info>");
 
         for (; ;) {
@@ -88,7 +99,18 @@ final class WatchCommand extends Command
                     interactive: false,
                     warnAboutStaticCredentials: false,
                 );
+            } catch (AwsIdentityTimedOut $e) {
+                if (! $timedOut) {
+                    $this->reportFailure($e);
+                    $this->reportRetry($seconds);
+                }
+
+                $timedOut = true;
+
+                continue;
             } catch (AwsAuthenticationFailed) {
+                $timedOut = false;
+
                 if (! $waiting) {
                     $this->newLine();
                     $this->line("<comment>AWS SSO session [{$profile}] is no longer usable.</comment>");
@@ -99,6 +121,8 @@ final class WatchCommand extends Command
 
                 continue;
             } catch (LaravelAwsSsoException $e) {
+                $timedOut = false;
+
                 if (! $waiting) {
                     $this->reportFailure($e);
                     $this->reportRestartInstructions();
@@ -109,9 +133,10 @@ final class WatchCommand extends Command
                 continue;
             }
 
-            if ($waiting) {
+            if ($waiting || $timedOut) {
                 $this->line("<info>AWS SSO session [{$profile}] is usable again.</info>");
                 $waiting = false;
+                $timedOut = false;
             }
         }
     }
@@ -126,6 +151,11 @@ final class WatchCommand extends Command
     {
         $this->line('Select the <info>aws-sso</info> tab and press <info>r</info> to sign in.');
         $this->line('Without tab shortcuts, run <info>php artisan aws-sso:login</info> in another terminal.');
+    }
+
+    private function reportRetry(int $seconds): void
+    {
+        $this->line("The watcher will retry in <info>{$seconds}</info> seconds.");
     }
 
     private function interval(Config $config): int

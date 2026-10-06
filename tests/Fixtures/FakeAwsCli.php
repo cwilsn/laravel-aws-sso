@@ -7,7 +7,9 @@ namespace LaravelAwsSso\Tests\Fixtures;
 use LaravelAwsSso\Aws\AwsCli;
 use LaravelAwsSso\Aws\AwsIdentity;
 use LaravelAwsSso\Exceptions\AwsAuthenticationFailed;
+use LaravelAwsSso\Exceptions\AwsIdentityTimedOut;
 use LogicException;
+use RuntimeException;
 
 /**
  * A scriptable AWS CLI double.
@@ -27,7 +29,7 @@ final class FakeAwsCli implements AwsCli
 
     public ?AwsAuthenticationFailed $loginFailure = null;
 
-    /** @var list<AwsIdentity|AwsAuthenticationFailed> */
+    /** @var list<AwsIdentity|AwsAuthenticationFailed|AwsIdentityTimedOut> */
     private array $identityResults = [];
 
     public static function authenticated(?AwsIdentity $identity = null): self
@@ -46,7 +48,7 @@ final class FakeAwsCli implements AwsCli
         );
     }
 
-    public function queueIdentity(AwsIdentity|AwsAuthenticationFailed $result): self
+    public function queueIdentity(AwsIdentity|AwsAuthenticationFailed|AwsIdentityTimedOut $result): self
     {
         $this->identityResults[] = $result;
 
@@ -57,6 +59,13 @@ final class FakeAwsCli implements AwsCli
     {
         return $this->queueIdentity(
             AwsAuthenticationFailed::identityUnavailable('fake', 'The SSO session associated with this profile has expired.')
+        );
+    }
+
+    public function queueIdentityTimeout(): self
+    {
+        return $this->queueIdentity(
+            AwsIdentityTimedOut::make('my-dev-profile', 15, new RuntimeException('Process timed out.'))
         );
     }
 
@@ -75,7 +84,7 @@ final class FakeAwsCli implements AwsCli
             throw new LogicException('FakeAwsCli::identity() was called more times than results were queued.');
         }
 
-        if ($result instanceof AwsAuthenticationFailed) {
+        if ($result instanceof AwsAuthenticationFailed || $result instanceof AwsIdentityTimedOut) {
             throw $result;
         }
 
